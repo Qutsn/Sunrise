@@ -1,0 +1,34 @@
+name: Build PR 69
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout PR 69 code
+        uses: actions/checkout@v4
+        with:
+          repository: ltsReaver/Sunrise
+          ref: ab91d494ed0be8fc872d8806c3c3e33594a07453
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: >
+          msbuild Sunrise.sln /m
+          /p:Configuration=Release
+          /p:Platform=x64
+          /verbosity:minimal
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sunrise-PR69-Release-x64
+          path: |
+            build/x64/Release/steam_api64.dll
+            build/x64/Release/steam_api64.pdb
+          if-no-files-found: error

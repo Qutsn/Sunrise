@@ -1,7 +1,10 @@
 #include <Windows.h>
 
+#include <array>
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 #include "../../../core/logging/log.h"
@@ -39,6 +42,53 @@ std::atomic<GetStep> g_step{nullptr};
 std::atomic_int32_t g_publishedStep{kNoStep};
 /** Tick that step was read on. A stale value reads as out of world. */
 std::atomic_uint64_t g_publishedTick{0};
+/** Last raw step emitted by the diagnostic edge logger. */
+std::atomic_int32_t g_reportedStep{std::numeric_limits<std::int32_t>::min()};
+
+/** @return The phase represented by one raw boot-flow step. */
+[[nodiscard]] state::activity::WorldPhase phase_for_step(std::int32_t step) noexcept {
+    if (step == kInWorld) {
+        return state::activity::WorldPhase::arrived;
+    }
+    if (step >= kActivityLoadFirst && step < kInWorld) {
+        return state::activity::WorldPhase::transitioning;
+    }
+    return state::activity::WorldPhase::idle;
+}
+
+/** @return A stable name for the activity phase in diagnostic records. */
+[[nodiscard]] const char* phase_name(state::activity::WorldPhase phase) noexcept {
+    switch (phase) {
+    case state::activity::WorldPhase::idle:
+        return "idle";
+    case state::activity::WorldPhase::transitioning:
+        return "transitioning";
+    case state::activity::WorldPhase::arrived:
+        return "arrived";
+    }
+    return "unknown";
+}
+
+/** Emits only raw-step edges, leaving the existing phase state machine untouched. */
+void report_world_step(std::int32_t step) noexcept {
+    const std::int32_t previous = g_reportedStep.exchange(step, std::memory_order_relaxed);
+    if (previous == step
+        || !core::log::accepts(core::log::Channel::client, core::log::Level::debug)) {
+        return;
+    }
+    const state::activity::WorldPhase phase = phase_for_step(step);
+    std::array<char, 128> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=diag stage=world_step step=%d phase=%s",
+                                      step,
+                                      phase_name(phase));
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
 
 /** @return The current step, or the absent one when the accessor is missing. */
 [[nodiscard]] std::int32_t read_step() noexcept {
@@ -50,8 +100,10 @@ std::atomic_uint64_t g_publishedTick{0};
 
 /** Publishes the client's own boot-flow step. */
 void poll_world_step() noexcept {
-    g_publishedStep.store(read_step(), std::memory_order_relaxed);
+    const std::int32_t step = read_step();
+    g_publishedStep.store(step, std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
+    report_world_step(step);
 }
 
 /** Reports whether the player is in a loaded destination. */
@@ -101,6 +153,7 @@ bool install_world_step() noexcept {
 /** Clears the boot-flow step accessor it found. */
 void uninstall_world_step() noexcept {
     g_step.store(nullptr, std::memory_order_release);
+    g_reportedStep.store(std::numeric_limits<std::int32_t>::min(), std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::bootflow

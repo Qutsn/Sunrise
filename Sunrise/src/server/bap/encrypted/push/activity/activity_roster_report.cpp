@@ -44,7 +44,7 @@ void report_roster_push(Session& session,
                       "ev=activity stage=roster result=%s soid=0x%llX public=%u dest=%.*s "
                       "groups=%zu top=%zu sub=%zu subkeys=%zu objects=%zu bytes=%zu state=%u "
                       "keygroup=0x%X grant=%d region=%u slice=%u spawn=0x%X join=0x%llX "
-                      "player=0x%llX",
+                      "player=0x%llX binding=%llu epoch_seen=%u epoch_binding=%llu",
                       kOutcomeNames[static_cast<std::size_t>(outcome)],
                       static_cast<unsigned long long>(session.activity.session.sessionId),
                       session.activity.role == ActivityClientRole::publicTarget ? 1U : 0U,
@@ -63,7 +63,11 @@ void report_roster_push(Session& session,
                       snapshot.spawnSliceSet,
                       snapshot.spawnSetHash,
                       static_cast<unsigned long long>(session.activityCharacterSoid),
-                      static_cast<unsigned long long>(snapshot.playerKey));
+                      static_cast<unsigned long long>(snapshot.playerKey),
+                      static_cast<unsigned long long>(session.activity.bindingGeneration),
+                      session.activityPatchEpoch.seen ? 1U : 0U,
+                      static_cast<unsigned long long>(
+                          session.activityPatchEpoch.bindingGeneration));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          outcome == RosterOutcome::published ? core::log::Level::debug

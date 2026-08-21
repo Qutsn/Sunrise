@@ -83,8 +83,8 @@ bool consume_activity_keepalive(Session& session,
                                 bool& touchesScratch) noexcept {
     written = 0;
     const std::uint64_t now = GetTickCount64();
-    // The burst runs only while the client is loading. A join or a transition-token change opens
-    // that window. Outside it the roster goes out on the keepalive alone.
+    // The burst runs only while the client is loading. A join, start-activity request or
+    // transition-token change opens that window. Outside it the roster goes out on the keepalive.
     const bool burstDue =
         now < session.activityTransitionUntilTick && now >= session.activityRosterDueTick;
     const bool keepaliveDue = now >= session.activityKeepaliveDueTick;

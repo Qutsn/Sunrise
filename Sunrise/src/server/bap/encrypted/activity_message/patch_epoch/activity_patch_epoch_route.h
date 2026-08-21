@@ -8,7 +8,7 @@ namespace sunrise::server::bap::encrypted::activity_message::patch_epoch {
 /**
  * Parses type 52 and keeps its epoch for the next roster update.
  * @param sessionId Authenticated nonzero joined activity capability.
- * @param request Validated zero-handle svc8 envelope.
+ * @param request Validated connection-scoped svc8 envelope.
  * @param plan Cleared, then receives the epoch echo.
  * @return True when the fixed 16-byte epoch parses.
  */

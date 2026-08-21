@@ -84,6 +84,7 @@ ConnectionFields connection_fields(const ServiceOutcome& outcome) noexcept {
     // The initial load is a transition too, and its token does not arrive for several seconds.
     fields.opensTransitionWindow =
         plan->delivery == activity_message::Delivery::joinNotifications || plan->transitionStarted;
+    fields.rearmsRoster = plan->rearmsRoster;
     if (plan->mutationDomain == activity_message::MutationDomain::patchEpoch) {
         fields.patchEpoch = plan->patchEpoch;
         fields.retainsPatchEpoch = true;
@@ -118,6 +119,15 @@ void publish_connection_fields(Session& session,
     }
     if (fields.opensTransitionWindow) {
         session.activityTransitionUntilTick = GetTickCount64() + kTransitionWindowMs;
+    }
+    // Start-activity does not create a new binding, but the client still clears the roster-owned
+    // transition objects. Keep the last state byte so the re-armed warm-up advances from a value
+    // the client has seen, and leave the binding-scoped patch epoch intact.
+    if (fields.rearmsRoster) {
+        session.activityRosterDueTick = 0;
+        session.activityRosterSends = 0;
+        session.activityRosterGroups = 0;
+        session.activityRosterReason = 0;
     }
     // A join resets the client's roster container, so the warm-up is re-armed. Its unconditional
     // state-byte moves make the client deactivate and rebuild every roster-owned object, and the

@@ -195,6 +195,11 @@ bool prepare_start_activity(const service::Request& request, ActivityPlan& plan)
         return false;
     }
     plan.sessionId = request.accountHandle;
+    // The client clears transition-scoped roster objects before the destination's normal session
+    // path takes over. Re-arm the warm-up so the next burst advances the state byte and rebuilds
+    // those objects even when the roster's group set did not change.
+    plan.transitionStarted = true;
+    plan.rearmsRoster = true;
     plan.delivery = Delivery::refreshNotifications;
     plan.mutationDomain = MutationDomain::membership;
     return true;

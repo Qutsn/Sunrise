@@ -131,8 +131,8 @@ bool stage_notifications(Session& session,
                          std::array<std::byte, state::kBapNonceSize>& nonce,
                          std::span<std::byte> response,
                          std::size_t& written) noexcept {
-    // Each encoder refuses an absent session itself, so a plan that delivers nothing needs no
-    // session at all. Message type 52 is the one that arrives on an unallocated link.
+    // Each encoder refuses an absent session itself, while a plan that delivers nothing needs no
+    // notification body at all.
     if (activity.delivery == activity_message::Delivery::joinNotifications) {
         return push::activity::append_join_notifications(
             scratch, activity, key, nonce, response, written);

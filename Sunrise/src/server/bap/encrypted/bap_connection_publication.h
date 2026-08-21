@@ -17,8 +17,10 @@ struct ConnectionFields {
     /** The join also names the character the player signed in on. */
     std::uint64_t joinCharacterSoid{};
     bool retainsPatchEpoch{};
-    /** Set by a join or a transition-token change, which are the client starting a load. */
+    /** Set when a join, start-activity request or transition-token change begins a load. */
     bool opensTransitionWindow{};
+    /** Set when the committed request must re-arm state-sequence warm-up sends. */
+    bool rearmsRoster{};
     /** Set by a join alone, which re-arms the roster warm-up the new container needs. */
     bool joinsActivity{};
 };

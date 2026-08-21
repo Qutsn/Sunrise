@@ -127,7 +127,7 @@ struct Session {
     std::uint64_t activityMembershipSentGeneration{};
     /**
      * Tick count until which the client is loading, so the roster runs at its faster cadence.
-     * A join and a transition-token change are the only two things that open it.
+     * A join, start-activity request or transition-token change opens it.
      */
     std::uint64_t activityTransitionUntilTick{};
     /** The client's own patch epoch, scoped to the binding that received message 52. */

@@ -63,11 +63,10 @@ struct ActivityPlan final {
      * roster tick leaves it empty for up to a whole interval.
      */
     bool regionMoved{};
-    /**
-     * Set when the delta moved the client's transition token, which means it is starting a load.
-     * It is the only start signal on the wire, and the roster's faster cadence runs off it.
-     */
+    /** Set when a start-activity request or transition-token change begins a destination load. */
     bool transitionStarted{};
+    /** Set when the committed request must make the client rebuild roster-owned objects. */
+    bool rearmsRoster{};
     Delivery delivery{};
     MutationDomain mutationDomain{};
     BindingIntent bindingIntent{};

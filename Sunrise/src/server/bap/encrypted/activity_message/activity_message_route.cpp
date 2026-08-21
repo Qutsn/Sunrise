@@ -157,6 +157,47 @@ void record(const service::Request& request,
 }
 
 /**
+ * Resolves type 52's connection-scoped zero handle to the exact session this link owns.
+ * An explicit matching handle is also accepted for compatibility, but a foreign handle can never
+ * select another session through this route.
+ * @param binding Exact ActivityClient generation owned by this link.
+ * @param request Validated patch-epoch envelope.
+ * @param sessionId Cleared, then receives the owned logical session id.
+ * @return True when the current binding owns the patch epoch.
+ */
+[[nodiscard]] bool resolve_patch_epoch_session(const ActivityClientBinding& binding,
+                                               const service::Request& request,
+                                               std::uint64_t& sessionId) noexcept {
+    sessionId = state::activity::kAbsentSessionId;
+    if (!binding_is_current(binding)
+        || (request.accountHandle != state::activity::kAbsentSessionId
+            && request.accountHandle != binding.session.sessionId)) {
+        return false;
+    }
+    sessionId = binding.session.sessionId;
+    return true;
+}
+
+/** Reports the binding selected while preparing one connection-scoped patch epoch. */
+void report_patch_epoch_resolution(const ActivityClientBinding& binding,
+                                   std::uint64_t wireHandle) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=patch_epoch result=prepared "
+                                      "wire_handle=0x%llX session=0x%llX binding=%llu",
+                                      static_cast<unsigned long long>(wireHandle),
+                                      static_cast<unsigned long long>(binding.session.sessionId),
+                                      static_cast<unsigned long long>(
+                                          binding.bindingGeneration));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
+/**
  * Prepares the joined State and the whole initial lease mask as one mutation.
  * @param binding Exact ActivityClient generation already owned by this link.
  * @param request Validated owned svc8 envelope.
@@ -316,12 +357,16 @@ bool process(const ActivityClientBinding& binding,
         return false;
     }
     report_arrival(request);
-    // Join acquires or preserves an exact binding. Every other message, including type 52 and the
-    // receipt-only types, must name the exact session already owned by this link before it can
-    // mutate State or the receipt registry.
+    // Join acquires or preserves an exact binding. Type 52 is connection-scoped and carries zero;
+    // every other message must name the exact session already owned by this link.
     const std::uint32_t messageType = request.messageType;
-    const bool ownsMessage =
-        messageType == kJoinRequestMessageType || owns_session(binding, request);
+    std::uint64_t logicalSessionId = request.accountHandle;
+    bool ownsMessage = messageType == kJoinRequestMessageType;
+    if (messageType == epoch_message::kMessageType) {
+        ownsMessage = resolve_patch_epoch_session(binding, request, logicalSessionId);
+    } else if (!ownsMessage) {
+        ownsMessage = owns_session(binding, request);
+    }
     if (!ownsMessage) {
         report_message(request.messageType, request.accountHandle, "unowned");
         record(request, store::Verdict::unowned, 0);
@@ -329,7 +374,10 @@ bool process(const ActivityClientBinding& binding,
     }
     bool prepared = false;
     if (request.messageType == epoch_message::kMessageType) {
-        prepared = patch_epoch::prepare(request.accountHandle, request, plan);
+        prepared = patch_epoch::prepare(logicalSessionId, request, plan);
+        if (prepared) {
+            report_patch_epoch_resolution(binding, request.accountHandle);
+        }
     } else if (request.messageType == kJoinRequestMessageType) {
         prepared = prepare_join(binding, request, plan);
     } else if (request.messageType == service::entity_slot_request::kMessageType) {

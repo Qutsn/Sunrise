@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "probe.h"
+#include "spawn_gate_record_dump.h"
 
 namespace sunrise::client::hooks::bootflow::spawn {
 namespace {

@@ -2,7 +2,6 @@
 #include <cstdio>
 
 #include "probe.h"
-#include "spawn_gate_record_dump.h"
 
 namespace sunrise::client::hooks::bootflow::spawn {
 namespace {
@@ -101,7 +100,8 @@ Reading examine(std::int32_t datum) noexcept {
         reading.refusal = Refusal::participationMissing;
         return reading;
     }
-    dump_record(record);
+    // Keep the first diagnostic pass to the gate's fields; the optional record dump reads a much
+    // wider reverse-engineered window and is intentionally left out until the gate path is known.
     reading.recordTask9 = record[kRecordTask9Offset];
     reading.recordReady = record[kRecordReadyOffset];
     if (reading.recordReady == 0) {

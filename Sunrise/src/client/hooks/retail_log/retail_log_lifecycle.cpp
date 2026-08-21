@@ -4,6 +4,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../targets/game.h"
+#include "activity_transition_probe.h"
 #include "retail_log_enqueue_observer.h"
 
 namespace sunrise::client::hooks::retail_log {
@@ -13,6 +14,7 @@ hooking::detour::Handle g_handle{};
 
 /** Installs the game retail-log capture hook. */
 bool install() noexcept {
+    activity_probe::reset();
     AcquireSRWLockExclusive(&g_lock);
     if (g_handle.attached) {
         ReleaseSRWLockExclusive(&g_lock);
@@ -50,6 +52,9 @@ bool uninstall() noexcept {
     const bool removed = hooking::detour::uninstall(g_handle, protectedEntries)
                          == hooking::detour::UninstallResult::removed;
     ReleaseSRWLockExclusive(&g_lock);
+    if (removed) {
+        activity_probe::reset();
+    }
     return removed;
 }
 

@@ -8,6 +8,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../targets/game.h"
+#include "activity_transition_probe.h"
 
 namespace sunrise::client::hooks::retail_log {
 namespace {
@@ -81,6 +82,7 @@ void capture_line(std::int32_t siteId, const char* text) noexcept {
                             ? static_cast<std::size_t>(written)
                             : line.size() - 1;
     core::log::write(core::log::Channel::client, core::log::Level::info, {line.data(), length});
+    activity_probe::observe(siteId, {sanitized.data(), textLength});
 }
 
 /**

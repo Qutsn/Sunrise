@@ -25,18 +25,19 @@ constexpr std::string_view kHoldSignatureText =
 /** Compiled pattern bytes of the signature text above. */
 constexpr auto kHoldSignature = signature<signature_length(kHoldSignatureText)>(kHoldSignatureText);
 
-/**
- * Answer that lets the handoff test pass. The native predicate holds for an armed pending
- * destination, or for a cinematic under a 5,000 ms timer. This answer skips that wait. It has one
- * call site, the step's own update, so nothing else sees the change.
- */
-constexpr bool kReleased = false;
+/** Fallback used only when the Detours trampoline is unavailable. */
+constexpr bool kFallbackReleased = false;
 /** Do not let a polled handoff predicate turn the diagnostic sink into a frame-rate log. */
 constexpr std::uint64_t kReportIntervalMs = 500;
 
+using DestinationHold = bool(__fastcall*)(void*) noexcept;
+
 hooking::detour::Handle g_handle{};
+std::atomic<DestinationHold> g_original{nullptr};
 std::atomic_uint64_t g_callCount{};
 std::atomic_uint64_t g_lastReportTick{};
+std::atomic_bool g_nativeSeen{false};
+std::atomic_bool g_lastNative{false};
 
 /** @return A stable name for the activity phase in diagnostic records. */
 [[nodiscard]] const char* phase_name(state::activity::WorldPhase phase) noexcept {
@@ -51,15 +52,27 @@ std::atomic_uint64_t g_lastReportTick{};
     return "unknown";
 }
 
-/** Reports the handoff call at the first call and at a bounded interval thereafter. */
-void report_handoff() noexcept {
+/** Reports the native answer when it changes and at a bounded interval thereafter. */
+void report_handoff(bool native, bool originalAvailable) noexcept {
     const std::uint64_t now = GetTickCount64();
     const std::uint64_t call = g_callCount.fetch_add(1, std::memory_order_relaxed) + 1;
-    bool report = call == 1;
-    if (call == 1) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::info,
-                         "ev=bootflow stage=orbit_handoff result=released");
+    const bool first = !g_nativeSeen.exchange(true, std::memory_order_relaxed);
+    const bool previousNative = g_lastNative.exchange(native, std::memory_order_relaxed);
+    const bool changed = first || previousNative != native;
+    bool report = changed;
+    if (first) {
+        std::array<char, 128> line{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=bootflow stage=orbit_handoff result=native native=%s "
+                                          "available=%s",
+                                          native ? "true" : "false",
+                                          originalAvailable ? "true" : "false");
+        if (written > 0) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
     }
     if (report) {
         g_lastReportTick.store(now, std::memory_order_relaxed);
@@ -76,11 +89,14 @@ void report_handoff() noexcept {
     }
 
     const state::activity::WorldPhase phase = state::activity::world_phase();
-    std::array<char, 192> line{};
+    std::array<char, 224> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=diag stage=orbit_handoff call=%llu phase=%s age_ms=%llu",
+                                      "ev=diag stage=orbit_handoff call=%llu native=%s "
+                                      "available=%s phase=%s age_ms=%llu",
                                       static_cast<unsigned long long>(call),
+                                      native ? "true" : "false",
+                                      originalAvailable ? "true" : "false",
                                       phase_name(phase),
                                       static_cast<unsigned long long>(
                                           state::activity::world_transition_age()));
@@ -92,15 +108,19 @@ void report_handoff() noexcept {
 }
 
 /**
- * Releases the destination hold. The original is never called: blocking is the only answer it
- * gives here, so answering directly gives the same result with no call.
- * @param stepCtx Borrowed step context; the answer does not depend on it.
- * @return The released answer, always.
+ * Runs the native destination-hold predicate for this experiment.
+ * @param stepCtx Borrowed step context passed to the native predicate.
+ * @return The native answer, or the released fallback when the trampoline is unavailable.
  */
 __declspec(noinline) bool __fastcall destination_hold(void* stepCtx) noexcept {
-    (void)stepCtx;
-    report_handoff();
-    return kReleased;
+    const DestinationHold original = g_original.load(std::memory_order_acquire);
+    if (original == nullptr) {
+        report_handoff(kFallbackReleased, false);
+        return kFallbackReleased;
+    }
+    const bool native = original(stepCtx);
+    report_handoff(native, true);
+    return native;
 }
 
 } // namespace
@@ -127,6 +147,8 @@ bool install_orbit_handoff() noexcept {
                          "ev=bootflow stage=orbit_handoff result=fail reason=attach");
         return false;
     }
+    g_original.store(reinterpret_cast<DestinationHold>(g_handle.original),
+                     std::memory_order_release);
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
                      "ev=bootflow stage=orbit_handoff result=ok");
@@ -138,8 +160,11 @@ void uninstall_orbit_handoff() noexcept {
     if (g_handle.attached) {
         (void)hooking::detour::uninstall(g_handle);
     }
+    g_original.store(nullptr, std::memory_order_release);
     g_callCount.store(0, std::memory_order_release);
     g_lastReportTick.store(0, std::memory_order_release);
+    g_nativeSeen.store(false, std::memory_order_release);
+    g_lastNative.store(false, std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::bootflow

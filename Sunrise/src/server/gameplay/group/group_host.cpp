@@ -95,6 +95,61 @@ SRWLOCK g_admittedLock{SRWLOCK_INIT};
 /** Admitted peers. A join claims a slot and a leave never reclaims one in this POC. */
 std::array<Admitted, kAdmittedCapacity> g_admitted{};
 
+/** Fixed diagnostic buffer large enough for every currently published row. */
+constexpr std::size_t kDiagnosticSnapshotCapacity = 16;
+
+/** Logs the admitted and host tables after a peer release path has completed. */
+void report_release_snapshot(const char* event,
+                             std::uint64_t sessionId,
+                             const state::gameplay::Endpoint& endpoint,
+                             std::size_t removed) noexcept {
+    std::array<AdmittedRow, kDiagnosticSnapshotCapacity> admitted{};
+    std::size_t admittedCount = 0;
+    snapshot_admitted(admitted, admittedCount);
+
+    std::array<HostSessionRow, kDiagnosticSnapshotCapacity> hosts{};
+    std::size_t hostCount = 0;
+    snapshot_host_sessions(hosts, hostCount);
+
+    report(core::log::Level::info,
+           "ev=gameplay stage=handoff_snapshot event=%s session=0x%016llX "
+           "endpoint=0x%08X:%u removed=%zu admitted=%zu hosts=%zu",
+           event,
+           static_cast<unsigned long long>(sessionId),
+           endpoint.address,
+           static_cast<unsigned>(endpoint.port),
+           removed,
+           admittedCount,
+           hostCount);
+    for (std::size_t index = 0; index < admittedCount; ++index) {
+        const AdmittedRow& row = admitted[index];
+        report(core::log::Level::debug,
+               "ev=gameplay stage=handoff_snapshot kind=admitted event=%s "
+               "session=0x%016llX endpoint=0x%08X:%u join=0x%016llX "
+               "complete=%u published=%u host=%u player=%u",
+               event,
+               static_cast<unsigned long long>(row.sessionId),
+               row.endpoint.address,
+               static_cast<unsigned>(row.endpoint.port),
+               static_cast<unsigned long long>(row.joinId),
+               row.joinComplete ? 1U : 0U,
+               row.activityHostPublished ? 1U : 0U,
+               row.hasPlayer ? 1U : 0U,
+               row.playerPublished ? 1U : 0U);
+    }
+    for (std::size_t index = 0; index < hostCount; ++index) {
+        const HostSessionRow& row = hosts[index];
+        report(core::log::Level::debug,
+               "ev=gameplay stage=handoff_snapshot kind=host event=%s "
+               "group=0x%016llX target=0x%016llX region=%d generation=%llu",
+               event,
+               static_cast<unsigned long long>(row.groupSessionId),
+               static_cast<unsigned long long>(row.hostSessionId),
+               row.regionIndex,
+               static_cast<unsigned long long>(row.generation));
+    }
+}
+
 /** Member state this host publishes for every member carrying the join id. */
 constexpr wire::MemberState kJoinMemberState = wire::MemberState::ready;
 
@@ -360,6 +415,18 @@ void fill_activity_host(wire::ActivityHostParameter& body,
            update.activityHost.address,
            static_cast<unsigned>(update.activityHost.port),
            wire::parameter_names(update.carriedMask, names.data(), names.size()));
+    report(core::log::Level::debug,
+           "ev=gameplay stage=activityhost event=publish_binding result=%s "
+           "group=0x%016llX generation=%llu source=0x%016llX/%llu "
+           "target=0x%016llX/%llu carried=0x%08X",
+           sent ? "queued" : "deferred",
+           static_cast<unsigned long long>(binding.groupSessionId),
+           static_cast<unsigned long long>(binding.generation),
+           static_cast<unsigned long long>(binding.source.sessionId),
+           static_cast<unsigned long long>(binding.source.createdRevision),
+           static_cast<unsigned long long>(binding.target.sessionId),
+           static_cast<unsigned long long>(binding.target.createdRevision),
+           static_cast<unsigned>(update.carriedMask));
     return sent;
 }
 
@@ -445,6 +512,18 @@ void answer_parameters(std::uint64_t sessionId, std::uint64_t requested) noexcep
            sent ? "answered" : "fail",
            static_cast<unsigned>(carried),
            wire::parameter_names(carried, names.data(), names.size()));
+    report(core::log::Level::debug,
+           "ev=gameplay stage=activityhost event=answer_binding result=%s "
+           "group=0x%016llX generation=%llu source=0x%016llX/%llu "
+           "target=0x%016llX/%llu carried=0x%08X",
+           sent ? "queued" : "fail",
+           static_cast<unsigned long long>(binding.groupSessionId),
+           static_cast<unsigned long long>(binding.generation),
+           static_cast<unsigned long long>(binding.source.sessionId),
+           static_cast<unsigned long long>(binding.source.createdRevision),
+           static_cast<unsigned long long>(binding.target.sessionId),
+           static_cast<unsigned long long>(binding.target.createdRevision),
+           static_cast<unsigned>(carried));
 }
 
 /**
@@ -474,13 +553,18 @@ void release(std::uint64_t sessionId) noexcept {
     peer::drop(sessionId);
     // The region's activity host stays. A leave is also how the peer fast travels to the region it
     // is already in, and a fresh id there is `public_activity_host_mismatch`.
+    state::gameplay::Endpoint endpoint{};
+    std::size_t removed = 0;
     AcquireSRWLockExclusive(&g_admittedLock);
     for (Admitted& entry : g_admitted) {
         if (entry.occupied && entry.sessionId == sessionId) {
+            endpoint = entry.endpoint;
+            ++removed;
             entry = {};
         }
     }
     ReleaseSRWLockExclusive(&g_admittedLock);
+    report_release_snapshot("leave", sessionId, endpoint, removed);
 }
 
 } // namespace
@@ -503,6 +587,7 @@ void release_endpoint(const state::gameplay::Endpoint& endpoint) noexcept {
                static_cast<unsigned>(endpoint.port),
                count);
     }
+    report_release_snapshot("endpoint", 0, endpoint, count);
 }
 
 /** Consumes one group-session message. */
@@ -770,6 +855,7 @@ void service(std::uint64_t now) noexcept {
     // The peer drops a stale target locally and sends no leave for it. Such a record shows up
     // only as the least recently named one over the capacity.
     std::uint64_t retired = 0;
+    state::gameplay::Endpoint retiredEndpoint{};
     AcquireSRWLockExclusive(&g_admittedLock);
     std::size_t occupied = 0;
     Admitted* oldest = nullptr;
@@ -784,6 +870,7 @@ void service(std::uint64_t now) noexcept {
     }
     if (occupied > kPublicSessionCapacity && oldest != nullptr) {
         retired = oldest->sessionId;
+        retiredEndpoint = oldest->endpoint;
         *oldest = {};
     }
     for (Admitted& record : g_admitted) {
@@ -813,6 +900,7 @@ void service(std::uint64_t now) noexcept {
     // peer rotates back into a region it has not left, and a fresh id there is a hard error.
     if (retired != 0) {
         peer::drop(retired);
+        report_release_snapshot("capacity", retired, retiredEndpoint, 1);
         report(core::log::Level::info,
                "ev=gameplay stage=admitted result=retired session=0x%016llX held=%zu",
                static_cast<unsigned long long>(retired),

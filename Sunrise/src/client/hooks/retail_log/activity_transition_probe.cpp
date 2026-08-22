@@ -42,7 +42,13 @@ enum class EventKind : std::uint8_t {
     prologue,
     arrival,
     clientCreate,
+    clientConnect,
+    clientJoin,
     clientReady,
+    clientSession,
+    clientSubstate,
+    clientSwap,
+    clientShutdown,
     clientDispose,
 };
 
@@ -50,6 +56,8 @@ struct Event {
     EventKind kind{};
     std::uint32_t first{};
     std::uint32_t second{};
+    std::int32_t signedFirst{};
+    std::int32_t signedSecond{};
     char firstText[kTokenCapacity]{};
     char secondText[kTokenCapacity]{};
 };
@@ -125,6 +133,25 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
     copy_token(value, output);
 }
 
+/** Copies a token after a marker, stopping at native punctuation or whitespace. */
+void copy_token_after(std::string_view text,
+                      std::string_view marker,
+                      std::span<char> output) noexcept {
+    const std::size_t start = text.find(marker);
+    if (start == std::string_view::npos) {
+        if (!output.empty()) {
+            output[0] = '\0';
+        }
+        return;
+    }
+    const std::size_t valueStart = start + marker.size();
+    const std::size_t valueEnd = text.find_first_of("'.,;] \r\n", valueStart);
+    copy_token(text.substr(valueStart,
+                            valueEnd == std::string_view::npos ? std::string_view::npos
+                                                               : valueEnd - valueStart),
+               output);
+}
+
 /** Parses an unsigned integer immediately following a textual marker. */
 [[nodiscard]] bool parse_integer(std::string_view text,
                                  std::string_view marker,
@@ -137,6 +164,20 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
     const char* first = text.data() + start + marker.size();
     const char* last = text.data() + text.size();
     const auto result = std::from_chars(first, last, output, base);
+    return result.ec == std::errc{} && result.ptr != first;
+}
+
+/** Parses a signed state number from a native activity-manager sentence. */
+[[nodiscard]] bool parse_signed_integer(std::string_view text,
+                                        std::string_view marker,
+                                        std::int32_t& output) noexcept {
+    const std::size_t start = text.find(marker);
+    if (start == std::string_view::npos) {
+        return false;
+    }
+    const char* first = text.data() + start + marker.size();
+    const char* last = text.data() + text.size();
+    const auto result = std::from_chars(first, last, output, 10);
     return result.ec == std::errc{} && result.ptr != first;
 }
 
@@ -266,10 +307,41 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
         copy_token(text.substr(start + 9), event.firstText);
         return true;
     }
+    if (text.find("activity_manager: [") != std::string_view::npos
+        && text.find("] Timed sub-state changed from '") != std::string_view::npos) {
+        event = {};
+        event.kind = EventKind::clientSubstate;
+        copy_between(text, "activity_manager: [", "] Timed", event.firstText);
+        std::int32_t from = 0;
+        std::int32_t to = 0;
+        if (!parse_signed_integer(text, "Timed sub-state changed from '", from)
+            || !parse_signed_integer(text, "' to '", to)) {
+            return false;
+        }
+        event.signedFirst = from;
+        event.signedSecond = to;
+        return true;
+    }
     if (text.find("activity_manager: Pumping creation for '") != std::string_view::npos) {
         event = {};
         event.kind = EventKind::clientCreate;
         copy_between(text, "Pumping creation for '", "' activity", event.firstText);
+        return true;
+    }
+    if (text.find("activity_manager: '") != std::string_view::npos
+        && text.find("' connecting to AH ID '") != std::string_view::npos) {
+        event = {};
+        event.kind = EventKind::clientConnect;
+        copy_between(text, "activity_manager: '", "' connecting", event.firstText);
+        copy_between(text, "connecting to AH ID '", "'", event.secondText);
+        return true;
+    }
+    if (text.find("activity_manager: '") != std::string_view::npos
+        && text.find("' activity client sent join request to AH ") != std::string_view::npos) {
+        event = {};
+        event.kind = EventKind::clientJoin;
+        copy_between(text, "activity_manager: '", "' activity client", event.firstText);
+        copy_token_after(text, "sent join request to AH ", event.secondText);
         return true;
     }
     if (text.find("activity client '[AC ") != std::string_view::npos
@@ -278,6 +350,28 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
         event.kind = EventKind::clientReady;
         copy_between(text, "activity client '[AC ", " CON-", event.firstText);
         copy_between(text, "AH->", " ", event.secondText);
+        return true;
+    }
+    if (text.find("PRIVATE activity instance is ready for instantiation")
+        != std::string_view::npos) {
+        event = {};
+        event.kind = EventKind::clientSession;
+        copy_token("PRIVATE CURRENT", event.firstText);
+        copy_token_after(text, "session=", event.secondText);
+        return true;
+    }
+    if (text.find("activity_manager: '") != std::string_view::npos
+        && text.find("' shutting down, waiting") != std::string_view::npos) {
+        event = {};
+        event.kind = EventKind::clientShutdown;
+        copy_between(text, "activity_manager: '", "' shutting down", event.firstText);
+        return true;
+    }
+    if (text.find("Swapping '") != std::string_view::npos
+        && text.find("' activity instances") != std::string_view::npos) {
+        event = {};
+        event.kind = EventKind::clientSwap;
+        copy_between(text, "Swapping '", "' activity", event.firstText);
         return true;
     }
     if (text.find("shut down delay complete, disposing") != std::string_view::npos) {
@@ -312,8 +406,20 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
         return "arrival";
     case EventKind::clientCreate:
         return "client_create";
+    case EventKind::clientConnect:
+        return "client_connect";
+    case EventKind::clientJoin:
+        return "client_join";
     case EventKind::clientReady:
         return "client_ready";
+    case EventKind::clientSession:
+        return "client_session";
+    case EventKind::clientSubstate:
+        return "client_substate";
+    case EventKind::clientSwap:
+        return "client_swap";
+    case EventKind::clientShutdown:
+        return "client_shutdown";
     case EventKind::clientDispose:
         return "client_dispose";
     }
@@ -382,7 +488,17 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
         break;
     case EventKind::clientCreate:
     case EventKind::clientDispose:
+    case EventKind::clientShutdown:
+    case EventKind::clientSwap:
         detailLength = std::snprintf(detail.data(), detail.size(), "role=%s", event.firstText);
+        break;
+    case EventKind::clientConnect:
+    case EventKind::clientJoin:
+        detailLength = std::snprintf(detail.data(),
+                                     detail.size(),
+                                     "role=%s ah=%s",
+                                     event.firstText,
+                                     event.secondText);
         break;
     case EventKind::clientReady:
         detailLength = std::snprintf(detail.data(),
@@ -390,6 +506,21 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
                                      "role=%s ah=%s",
                                      event.firstText,
                                      event.secondText);
+        break;
+    case EventKind::clientSession:
+        detailLength = std::snprintf(detail.data(),
+                                     detail.size(),
+                                     "role=%s session=%s",
+                                     event.firstText,
+                                     event.secondText);
+        break;
+    case EventKind::clientSubstate:
+        detailLength = std::snprintf(detail.data(),
+                                     detail.size(),
+                                     "role=%s from=%d to=%d",
+                                     event.firstText,
+                                     event.signedFirst,
+                                     event.signedSecond);
         break;
     }
     if (detailLength <= 0) {

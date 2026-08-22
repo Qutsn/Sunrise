@@ -187,7 +187,8 @@ bool prepare_start_activity(const service::Request& request, ActivityPlan& plan)
         return false;
     }
     // The request carries no revision or bubble of its own, so the refresh guard is built from the
-    // absent pair rather than from a value the client did not send.
+    // absent pair rather than from a value the client did not send. The mutation is still prepared
+    // so the joined-session guard is checked and the transition flags are committed atomically.
     if (!membership_state::prepare_refresh(request.accountHandle,
                                            kNoRequestedRevision,
                                            state::activity::destination::kAbsentActivityIndex,
@@ -200,7 +201,11 @@ bool prepare_start_activity(const service::Request& request, ActivityPlan& plan)
     // those objects even when the roster's group set did not change.
     plan.transitionStarted = true;
     plan.rearmsRoster = true;
-    plan.delivery = Delivery::refreshNotifications;
+    // Do not answer this trigger with the current session's snapshot. At this point the client is
+    // already opening the destination ActivityClient, while this session still describes the
+    // activity being left; sending the refresh can make the client reject the new host as a
+    // different game. The destination's normal host-manager/join path supplies the next snapshot.
+    plan.delivery = Delivery::none;
     plan.mutationDomain = MutationDomain::membership;
     return true;
 }

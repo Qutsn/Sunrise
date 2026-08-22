@@ -220,7 +220,50 @@ void report_patch_epoch_resolution(const ActivityClientBinding& binding,
         plan.bindingIntent = BindingIntent::publicTarget;
         plan.targetBinding = plan.publicHost.target;
     } else {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=activity stage=join result=unresolved requested=0x%llX current=0x%llX",
+            static_cast<unsigned long long>(parsed.sessionId),
+            static_cast<unsigned long long>(binding.session.sessionId));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
         return false;
+    }
+    {
+        std::array<char, core::log::kLineCapacity> line{};
+        const char* intent = plan.bindingIntent == BindingIntent::preserveCurrent
+                                 ? "preserve_current"
+                                 : "public_target";
+        const std::uint64_t sourceSession =
+            plan.bindingIntent == BindingIntent::publicTarget ? plan.publicHost.source.sessionId
+                                                               : binding.source.sessionId;
+        const int written = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=activity stage=join result=resolved intent=%s requested=0x%llX "
+            "current=0x%llX source=0x%llX target=0x%llX host_generation=%llu "
+            "source_revision=%llu target_revision=%llu binding=%llu",
+            intent,
+            static_cast<unsigned long long>(parsed.sessionId),
+            static_cast<unsigned long long>(binding.session.sessionId),
+            static_cast<unsigned long long>(sourceSession),
+            static_cast<unsigned long long>(plan.targetBinding.sessionId),
+            static_cast<unsigned long long>(plan.publicHost.generation),
+            static_cast<unsigned long long>(
+                plan.bindingIntent == BindingIntent::publicTarget ? plan.publicHost.source.createdRevision
+                                                                    : binding.source.createdRevision),
+            static_cast<unsigned long long>(plan.targetBinding.createdRevision),
+            static_cast<unsigned long long>(binding.bindingGeneration));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::debug,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
     }
     // The client takes the low slots and the server keeps the reserve above them.
     const core::settings::server::gameplay::Settings& gameplay =

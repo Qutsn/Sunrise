@@ -94,6 +94,49 @@ void report_identity(const service::client_identity::ClientIdentity& parsed) noe
     }
 }
 
+/** Reports one authoritative delta only when it changed the stored host state. */
+void report_authoritative(const service::client_authoritative_data::ClientAuthoritativeData& parsed,
+                          const ActivityPlan& plan) noexcept {
+    const auto& mutation = plan.membershipMutation;
+    if (!mutation.changesState && !mutation.movesRegion && !mutation.movesTransitionToken
+        && !mutation.hasSnapshot) {
+        return;
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=activity stage=authoritative result=change session=0x%llX "
+        "token=%u token_present=%d spawn=%d/%u/0x%llX spawn_present=%d "
+        "teleport=%d/%u/%d/0x%X teleport_present=%d "
+        "region=%d/0x%X region_present=%d state_changed=%d region_moved=%d "
+        "transition_moved=%d snapshot=%d",
+        static_cast<unsigned long long>(plan.sessionId),
+        static_cast<unsigned int>(parsed.transitionToken),
+        parsed.hasTransitionToken ? 1 : 0,
+        static_cast<int>(parsed.spawn.state),
+        static_cast<unsigned int>(parsed.spawn.opaqueByte),
+        static_cast<unsigned long long>(parsed.spawn.opaqueValue),
+        parsed.hasSpawn ? 1 : 0,
+        static_cast<int>(parsed.teleport.state),
+        static_cast<unsigned int>(parsed.teleport.token),
+        parsed.teleport.sliceSetIndex,
+        parsed.teleport.sliceSetHash,
+        parsed.hasTeleport ? 1 : 0,
+        parsed.region.index,
+        parsed.region.hash,
+        parsed.hasRegion ? 1 : 0,
+        mutation.changesState ? 1 : 0,
+        mutation.movesRegion ? 1 : 0,
+        mutation.movesTransitionToken ? 1 : 0,
+        mutation.hasSnapshot ? 1 : 0);
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 } // namespace
 
 /** Stages a changed identity push or an unchanged transactional no-op. */
@@ -129,6 +172,7 @@ bool prepare_authoritative(const service::Request& request, ActivityPlan& plan) 
     plan.sessionId = request.accountHandle;
     plan.regionMoved = plan.membershipMutation.movesRegion;
     plan.transitionStarted = plan.membershipMutation.movesTransitionToken;
+    report_authoritative(parsed, plan);
     // A region move sends the roster even when the host state did not change, because the bubble
     // the player just entered has no authority until the roster grants it.
     plan.delivery = plan.membershipMutation.hasSnapshot || plan.regionMoved
@@ -173,7 +217,7 @@ bool prepare_start_activity(const service::Request& request, ActivityPlan& plan)
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=activity stage=start_activity result=%s from=%d to=%d "
-                                      "tail=%u",
+                                      "tail=%u delivery=none transition=1 rearm_roster=1",
                                       routed ? "accepted" : "out_of_range",
                                       parsed.sourceActivityIndex,
                                       parsed.destinationActivityIndex,

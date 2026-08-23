@@ -220,8 +220,13 @@ bool consume(Session& session,
             commit_staged_advertisement(session);
             // Any delivered activity notification resets the client's silence timer. Delay the
             // fallback keepalive so this same request does not append a redundant second push.
+            // A join is different: the join response cannot carry the membership seed because
+            // the entity-slot commit clears the new ActivityClient's membership record. Make the
+            // next pump send that seed immediately, before the world-loading state waits for it.
             if (activityPlan != nullptr && framedSize != 0) {
-                session.activityKeepaliveDueTick = GetTickCount64() + kActivityKeepaliveIntervalMs;
+                const std::uint64_t now = GetTickCount64();
+                session.activityKeepaliveDueTick =
+                    connection.joinsActivity ? now : now + kActivityKeepaliveIntervalMs;
             }
             session.accountMutationPublished = mutatesAccount;
             if (transaction_if<EquipmentSwapTransaction>(outcome) != nullptr) {

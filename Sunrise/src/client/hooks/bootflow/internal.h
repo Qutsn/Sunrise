@@ -48,12 +48,12 @@ void uninstall_orbit_slice_set() noexcept;
 void uninstall_composition_check() noexcept;
 
 /**
- * Attaches the orbit handoff release, which stops the destination step parking.
+ * Attaches the native orbit handoff predicate observer.
  * @return True when the target is found and the detour attaches.
  */
 [[nodiscard]] bool install_orbit_handoff() noexcept;
 
-/** Detaches the orbit handoff release. */
+/** Detaches the native orbit handoff predicate observer. */
 void uninstall_orbit_handoff() noexcept;
 
 /**

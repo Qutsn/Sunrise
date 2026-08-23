@@ -101,8 +101,13 @@ void report_world_step(std::int32_t step) noexcept {
 /** Publishes the client's own boot-flow step. */
 void poll_world_step() noexcept {
     const std::int32_t step = read_step();
-    g_publishedStep.store(step, std::memory_order_relaxed);
+    const std::int32_t previous = g_publishedStep.exchange(step, std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
+    // A spawn released at step 37 stops polling the spawn gate. The frame poll still reaches the
+    // in-world edge, so it owns the corresponding fade release in that path.
+    if (step == kInWorld && previous != kInWorld) {
+        release_world_fade();
+    }
     report_world_step(step);
 }
 
@@ -132,6 +137,11 @@ void observe_world_step() noexcept {
         rearm_fade_release();
     }
     state::activity::note_world_phase(phase);
+}
+
+/** @return The current raw boot-flow step, or the absent step when unavailable. */
+std::int32_t current_world_step() noexcept {
+    return read_step();
 }
 
 /** Finds the boot-flow step accessor. */

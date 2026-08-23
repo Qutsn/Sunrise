@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../../patterns/image_scan.h"
 
 namespace sunrise::client::hooks::bootflow {
@@ -101,6 +103,12 @@ void uninstall_world_step() noexcept;
 void observe_world_step() noexcept;
 
 /**
+ * Reads the client's current raw boot-flow step on the calling game thread.
+ * @return The current step, or -1 when the accessor was not found or no step is active.
+ */
+[[nodiscard]] std::int32_t current_world_step() noexcept;
+
+/**
  * Attaches the spawn hold, which puts the player spawn after the world-transition fade is armed.
  * @return True when the target is found and the detour attaches.
  */
@@ -121,7 +129,7 @@ void uninstall_fade_release() noexcept;
 
 /**
  * Releases the world-transition fade channel.
- * The spawn gate owns the timing. Does nothing unless `client.fade_release` is set.
+ * The world-step arrival edge owns the timing. Does nothing unless `client.fade_release` is set.
  */
 void release_world_fade() noexcept;
 

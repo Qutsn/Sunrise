@@ -25,8 +25,8 @@ constexpr std::string_view kHoldSignatureText =
 /** Compiled pattern bytes of the signature text above. */
 constexpr auto kHoldSignature = signature<signature_length(kHoldSignatureText)>(kHoldSignatureText);
 
-/** Fallback used only when the Detours trampoline is unavailable. */
-constexpr bool kFallbackReleased = false;
+/** The original hook always returns the released answer. */
+constexpr bool kReleased = false;
 /** Do not let a polled handoff predicate turn the diagnostic sink into a frame-rate log. */
 constexpr std::uint64_t kReportIntervalMs = 500;
 
@@ -52,21 +52,22 @@ std::atomic_bool g_lastNative{false};
     return "unknown";
 }
 
-/** Reports the native answer when it changes and at a bounded interval thereafter. */
-void report_handoff(bool native, bool originalAvailable) noexcept {
+/** Reports the forced answer when it changes and at a bounded interval thereafter. */
+void report_handoff(bool originalAvailable) noexcept {
     const std::uint64_t now = GetTickCount64();
     const std::uint64_t call = g_callCount.fetch_add(1, std::memory_order_relaxed) + 1;
     const bool first = !g_nativeSeen.exchange(true, std::memory_order_relaxed);
-    const bool previousNative = g_lastNative.exchange(native, std::memory_order_relaxed);
-    const bool changed = first || previousNative != native;
+    const bool previousNative = g_lastNative.exchange(kReleased, std::memory_order_relaxed);
+    const bool changed = first || previousNative != kReleased;
     bool report = changed;
     if (first) {
         std::array<char, 128> line{};
         const int written = std::snprintf(line.data(),
                                           line.size(),
-                                          "ev=bootflow stage=orbit_handoff result=native native=%s "
+                                          "ev=bootflow stage=orbit_handoff result=forced_release "
+                                          "native=%s "
                                           "available=%s",
-                                          native ? "true" : "false",
+                                          kReleased ? "true" : "false",
                                           originalAvailable ? "true" : "false");
         if (written > 0) {
             core::log::write(core::log::Channel::client,
@@ -95,7 +96,7 @@ void report_handoff(bool native, bool originalAvailable) noexcept {
                                       "ev=diag stage=orbit_handoff call=%llu native=%s "
                                       "available=%s phase=%s age_ms=%llu",
                                       static_cast<unsigned long long>(call),
-                                      native ? "true" : "false",
+                                      kReleased ? "true" : "false",
                                       originalAvailable ? "true" : "false",
                                       phase_name(phase),
                                       static_cast<unsigned long long>(
@@ -108,19 +109,14 @@ void report_handoff(bool native, bool originalAvailable) noexcept {
 }
 
 /**
- * Runs the native destination-hold predicate for this experiment.
- * @param stepCtx Borrowed step context passed to the native predicate.
- * @return The native answer, or the released fallback when the trampoline is unavailable.
+ * Returns the original forced-release answer while recording handoff timing.
+ * @param stepCtx Borrowed step context, intentionally ignored to preserve the original answer.
+ * @return The original released answer.
  */
 __declspec(noinline) bool __fastcall destination_hold(void* stepCtx) noexcept {
-    const DestinationHold original = g_original.load(std::memory_order_acquire);
-    if (original == nullptr) {
-        report_handoff(kFallbackReleased, false);
-        return kFallbackReleased;
-    }
-    const bool native = original(stepCtx);
-    report_handoff(native, true);
-    return native;
+    (void)stepCtx;
+    report_handoff(g_original.load(std::memory_order_acquire) != nullptr);
+    return kReleased;
 }
 
 } // namespace

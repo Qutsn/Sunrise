@@ -30,6 +30,8 @@ constexpr auto kSpawnGateSignature =
 
 /** Bound the diagnostic work performed by the polled spawn gate. */
 constexpr std::uint64_t kReportIntervalMs = 500;
+/** The original hook holds the spawn for the current loading tick. */
+constexpr bool kHeld = false;
 
 using SpawnGate = bool(__fastcall*)(std::int32_t) noexcept;
 
@@ -135,12 +137,11 @@ void report_spawn_gate(std::int32_t datum,
 }
 
 /**
- * Observes the native spawn gate without imposing an additional wait.
- * The old experiment returned false while a destination was loading. That made the diagnostic
- * build alter the handoff timing, so this hook now records whether that experiment would have
- * held the spawn and returns the native answer unchanged.
+ * Observes the native spawn gate while preserving the original loading hold.
+ * The diagnostic fields describe what the native predicate returned and whether the original
+ * experiment holds this tick; the return value still follows the original hold behavior.
  * @param datum Borrowed player datum handle; the answer does not depend on it.
- * @return The native answer.
+ * @return The native answer, or the original held answer while a destination is loading.
  */
 __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
     const SpawnGate original = g_original.load(std::memory_order_acquire);
@@ -159,7 +160,7 @@ __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
         release_world_fade();
     }
     report_spawn_gate(datum, allowed, phase, age, wouldHold, client.holdSpawn);
-    return allowed;
+    return allowed && wouldHold ? kHeld : allowed;
 }
 
 } // namespace
@@ -201,7 +202,7 @@ bool install_spawn_hold() noexcept {
     g_original.store(reinterpret_cast<SpawnGate>(g_handle.original), std::memory_order_release);
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
-                     "ev=bootflow stage=spawn_hold result=ok mode=native_passthrough");
+                     "ev=bootflow stage=spawn_hold result=ok mode=original_hold");
     return true;
 }
 

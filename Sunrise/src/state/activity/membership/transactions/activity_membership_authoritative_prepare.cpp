@@ -27,7 +27,7 @@ bool prepare_authoritative(std::uint64_t sessionId,
         const bool revisionExhausted =
             root.activity.stateRevision == activity::kMaximumRevision
             || (record->membership.hasIdentity
-                && record->membership.revision == kMaximumMembershipRevision);
+                && root.activity.membershipRevision == kMaximumMembershipRevision);
         if (changed && revisionExhausted) {
             ready = false;
         } else {
@@ -40,8 +40,8 @@ bool prepare_authoritative(std::uint64_t sessionId,
                 transactions::moves_transition_token(record->membership, merged);
             prepared.hasSnapshot = changed && record->membership.hasIdentity;
             if (prepared.hasSnapshot) {
-                prepared.snapshot =
-                    transactions::make_snapshot(merged, merged.identity, merged.revision + 1U);
+                prepared.snapshot = transactions::make_snapshot(
+                    merged, merged.identity, transactions::next_revision(root.activity));
             }
         }
     }

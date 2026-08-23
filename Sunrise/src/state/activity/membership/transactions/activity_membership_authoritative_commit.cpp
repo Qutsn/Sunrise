@@ -19,7 +19,7 @@ bool commit_authoritative(ActivityState& state,
     const bool publishes = changed || movesRegion;
     const bool revisionExhausted = state.stateRevision == activity::kMaximumRevision
                                    || (record.membership.hasIdentity
-                                       && record.membership.revision == kMaximumMembershipRevision);
+                                       && state.membershipRevision == kMaximumMembershipRevision);
     if (publishes && revisionExhausted) {
         return false;
     }
@@ -30,8 +30,9 @@ bool commit_authoritative(ActivityState& state,
     // A region move advances the revision too. The citizen advertisement is rebuilt from the
     // merged region, and the client applies one update per revision.
     if (record.membership.hasIdentity) {
-        ++merged.revision;
+        merged.revision = next_revision(state);
         merged.acknowledgedRevision = kAbsentRevision;
+        state.membershipRevision = merged.revision;
     }
     record.membership = merged;
     publish_change(state, record);

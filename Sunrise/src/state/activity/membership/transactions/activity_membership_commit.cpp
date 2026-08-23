@@ -32,14 +32,13 @@ namespace {
         || !transactions::equal(record.membership.identity, prepared.snapshot.identity);
     if (changed
         && (state.stateRevision == activity::kMaximumRevision
-            || record.membership.revision == kMaximumMembershipRevision)) {
+            || state.membershipRevision == kMaximumMembershipRevision)) {
         return false;
     }
     if (!changed) {
         return true;
     }
-    const std::uint32_t revision =
-        record.membership.hasIdentity ? record.membership.revision + 1U : kInitialRevision;
+    const std::uint32_t revision = transactions::next_revision(state);
 
     MembershipState updated = record.membership;
     if (!updated.hasTransitionToken) {
@@ -51,6 +50,7 @@ namespace {
     updated.acknowledgedRevision = kAbsentRevision;
     updated.hasIdentity = true;
     record.membership = updated;
+    state.membershipRevision = revision;
     transactions::publish_change(state, record);
     return true;
 }
@@ -83,13 +83,14 @@ namespace {
                                     SessionRecord& record,
                                     const PendingMutation& prepared) noexcept {
     if (!prepared.hasSnapshot || !record.membership.hasIdentity
-        || record.membership.revision == kMaximumMembershipRevision
-        || prepared.snapshot.revision != record.membership.revision + 1U
+        || state.membershipRevision == kMaximumMembershipRevision
+        || prepared.snapshot.revision != transactions::next_revision(state)
         || !transactions::equal(prepared.snapshot.identity, record.membership.identity)) {
         return false;
     }
-    ++record.membership.revision;
+    record.membership.revision = prepared.snapshot.revision;
     record.membership.acknowledgedRevision = kAbsentRevision;
+    state.membershipRevision = prepared.snapshot.revision;
     transactions::publish_change(state, record);
     return true;
 }

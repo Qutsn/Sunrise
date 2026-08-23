@@ -11,6 +11,16 @@ namespace sunrise::state::activity::membership::transactions {
 inline constexpr std::uint8_t kRefreshGuardHalfWidth = 32;
 
 /**
+ * Selects the next membership revision shared by every activity session.
+ * @param state Activity State held under the root lock.
+ * @return Initial revision for the first publication, otherwise the next global revision.
+ */
+inline std::uint32_t next_revision(const ActivityState& state) noexcept {
+    return state.membershipRevision == kAbsentRevision ? kInitialRevision
+                                                       : state.membershipRevision + 1U;
+}
+
+/**
  * Packs a refresh request into a guard for its deferred transaction.
  * @param revision Membership revision the client saw.
  * @param bubbleIndex Logical bubble the client reported.

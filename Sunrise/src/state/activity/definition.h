@@ -107,6 +107,12 @@ struct ActivityState {
     forced::ForcedDestination forced{};
     /** One arrival row per activity message type, so no routed message is silently dropped. */
     receipts::ReceiptRegistry receipts{};
+    /**
+     * Last membership revision published by any activity session.
+     * The client keeps its duplicate filter across direct destination handoffs, so a new private
+     * session must continue this sequence instead of restarting at one.
+     */
+    std::uint32_t membershipRevision{membership::kAbsentRevision};
     std::uint64_t stateRevision{kInitialStateRevision};
     std::uint64_t nextSessionId{kFirstSessionId};
     std::uint64_t allocatorRevision{kInitialAllocatorRevision};

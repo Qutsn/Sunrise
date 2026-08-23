@@ -28,13 +28,12 @@ bool prepare_identity(std::uint64_t sessionId,
                              || !transactions::equal(record->membership.identity, identity);
         if (changed
             && (root.activity.stateRevision == activity::kMaximumRevision
-                || record->membership.revision == kMaximumMembershipRevision)) {
+                || root.activity.membershipRevision == kMaximumMembershipRevision)) {
             ready = false;
         } else {
             const std::uint32_t revision =
                 !changed ? record->membership.revision
-                         : (record->membership.hasIdentity ? record->membership.revision + 1U
-                                                           : kInitialRevision);
+                         : transactions::next_revision(root.activity);
             prepared.snapshot = transactions::make_snapshot(record->membership, identity, revision);
             prepared.identityGuard = identity;
             prepared.kind = MutationKind::identity;
@@ -98,10 +97,12 @@ bool prepare_republish(std::uint64_t sessionId, PendingMutation& mutation) noexc
         transactions::prepare_base(root.activity, root.account.primarySoid, sessionId, prepared);
     const bool ready = record != nullptr && record->membership.hasIdentity
                        && root.activity.stateRevision != activity::kMaximumRevision
-                       && record->membership.revision != kMaximumMembershipRevision;
+                       && root.activity.membershipRevision != kMaximumMembershipRevision;
     if (ready) {
         prepared.snapshot = transactions::make_snapshot(
-            record->membership, record->membership.identity, record->membership.revision + 1U);
+            record->membership,
+            record->membership.identity,
+            transactions::next_revision(root.activity));
         prepared.kind = MutationKind::republish;
         prepared.hasSnapshot = true;
         prepared.changesState = true;

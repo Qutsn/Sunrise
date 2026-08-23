@@ -1,11 +1,20 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 
 #include "../../../internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
+
+/**
+ * Arms the first membership push after an ActivityClient joins.
+ * The short delay keeps the QueueZ poll open until the claimed gameplay host session is ready.
+ * @param session Connection whose activity link just joined.
+ * @param now Current monotonic tick count.
+ */
+void arm_initial_membership_push(Session& session, std::uint64_t now) noexcept;
 
 /**
  * Writes the periodic activity-link keepalive when one is due. The link tears down after about

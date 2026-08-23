@@ -103,8 +103,8 @@ void poll_world_step() noexcept {
     const std::int32_t step = read_step();
     const std::int32_t previous = g_publishedStep.exchange(step, std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
-    // A spawn released at step 37 stops polling the spawn gate. The frame poll still reaches the
-    // in-world edge, so it owns the corresponding fade release in that path.
+    // A native spawn can stop polling the spawn gate before arrival. The frame poll still reaches
+    // the in-world edge, so it owns the corresponding fade release in that path.
     if (step == kInWorld && previous != kInWorld) {
         release_world_fade();
     }

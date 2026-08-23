@@ -64,7 +64,7 @@ void rearm_fade_release() noexcept {
     g_logged.store(false, std::memory_order_release);
 }
 
-/** Releases the world-transition fade channel. The spawn gate decides when. */
+/** Releases the world-transition fade channel when the world-step observer reaches arrival. */
 void release_world_fade() noexcept {
     const ReleaseChannel release = g_release.load(std::memory_order_acquire);
     if (release == nullptr || g_manager == nullptr || !core::settings::get().client.fadeRelease) {

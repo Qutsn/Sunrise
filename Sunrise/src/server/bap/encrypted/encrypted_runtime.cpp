@@ -11,6 +11,7 @@
 #include "activity_transaction/activity_transaction_notifications.h"
 #include "bap_connection_publication.h"
 #include "internal.h"
+#include "push/activity/activity_keepalive_push.h"
 #include "push/activity/activity_roster_push.h"
 #include "queuez/queuez_outcome_staging.h"
 #include "transactions/service_outcome_commit.h"
@@ -221,12 +222,16 @@ bool consume(Session& session,
             // Any delivered activity notification resets the client's silence timer. Delay the
             // fallback keepalive so this same request does not append a redundant second push.
             // A join is different: the join response cannot carry the membership seed because
-            // the entity-slot commit clears the new ActivityClient's membership record. Make the
-            // next pump send that seed immediately, before the world-loading state waits for it.
+            // the entity-slot commit clears the new ActivityClient's membership record. Leave the
+            // QueueZ poll open briefly so the host-session allocation slice finishes before the
+            // next pump tries to publish that seed.
             if (activityPlan != nullptr && framedSize != 0) {
                 const std::uint64_t now = GetTickCount64();
-                session.activityKeepaliveDueTick =
-                    connection.joinsActivity ? now : now + kActivityKeepaliveIntervalMs;
+                if (connection.joinsActivity) {
+                    push::activity::arm_initial_membership_push(session, now);
+                } else {
+                    session.activityKeepaliveDueTick = now + kActivityKeepaliveIntervalMs;
+                }
             }
             session.accountMutationPublished = mutatesAccount;
             if (transaction_if<EquipmentSwapTransaction>(outcome) != nullptr) {

@@ -109,7 +109,7 @@ void observe_world_step() noexcept;
 [[nodiscard]] std::int32_t current_world_step() noexcept;
 
 /**
- * Attaches the spawn hold, which puts the player spawn after the world-transition fade is armed.
+ * Attaches the spawn-gate observer used for native-result and predicate diagnostics.
  * @return True when the target is found and the detour attaches.
  */
 [[nodiscard]] bool install_spawn_hold() noexcept;

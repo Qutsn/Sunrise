@@ -30,10 +30,6 @@ constexpr auto kSpawnGateSignature =
 
 /** Bound the diagnostic work performed by the polled spawn gate. */
 constexpr std::uint64_t kReportIntervalMs = 500;
-/** The original hook holds the spawn for the current loading tick. */
-constexpr bool kHeld = false;
-/** First step whose cinematic state is ready to own the stage-one ship. */
-constexpr std::int32_t kStageOneReady = 37;
 
 using SpawnGate = bool(__fastcall*)(std::int32_t) noexcept;
 
@@ -142,10 +138,10 @@ void report_spawn_gate(std::int32_t datum,
 }
 
 /**
- * Holds the native spawn gate until the stage-one cinematic state is ready.
- * The diagnostic fields describe the native predicate and whether the configured hold applies.
+ * Observes the native spawn gate without imposing an additional client-side wait.
+ * The diagnostic fields retain the configured hold calculation for comparison with earlier runs.
  * @param datum Borrowed player datum handle; the answer does not depend on it.
- * @return The native answer once stage one is ready, or the held answer earlier in the load.
+ * @return The native answer.
  */
 __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
     const SpawnGate original = g_original.load(std::memory_order_acquire);
@@ -158,10 +154,9 @@ __declspec(noinline) bool __fastcall spawn_gate(std::int32_t datum) noexcept {
     const std::uint64_t age = state::activity::world_transition_age();
     const core::settings::client::Settings& client = core::settings::get().client;
     const bool gaveUp = age >= client.spawnHoldMs;
-    const bool stageOneReady = step >= kStageOneReady;
-    const bool wouldHold = transitioning && !stageOneReady && !gaveUp && client.holdSpawn;
+    const bool wouldHold = transitioning && !gaveUp && client.holdSpawn;
     report_spawn_gate(datum, allowed, phase, step, age, wouldHold, client.holdSpawn);
-    return allowed && wouldHold ? kHeld : allowed;
+    return allowed;
 }
 
 } // namespace
@@ -203,7 +198,7 @@ bool install_spawn_hold() noexcept {
     g_original.store(reinterpret_cast<SpawnGate>(g_handle.original), std::memory_order_release);
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
-                     "ev=bootflow stage=spawn_hold result=ok mode=stage_one_hold");
+                     "ev=bootflow stage=spawn_hold result=ok mode=native_passthrough");
     return true;
 }
 

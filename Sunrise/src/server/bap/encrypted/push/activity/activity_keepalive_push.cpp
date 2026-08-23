@@ -75,6 +75,22 @@ constexpr std::uint32_t kCurrentRevision = 0;
 
 } // namespace
 
+/** Arms the initial membership push after the host-session allocation slice can finish. */
+void arm_initial_membership_push(Session& session, std::uint64_t now) noexcept {
+    session.activityKeepaliveDueTick = now + kMembershipRetryIntervalMs;
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=membership_schedule result=armed "
+                                      "delay_ms=%llu",
+                                      static_cast<unsigned long long>(kMembershipRetryIntervalMs));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 /** Writes the periodic activity-link keepalive when one is due. */
 bool consume_activity_keepalive(Session& session,
                                 Scratch& scratch,

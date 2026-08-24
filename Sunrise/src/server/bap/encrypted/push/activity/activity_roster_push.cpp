@@ -4,8 +4,10 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <string_view>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/bubble_authority/runtime.h"

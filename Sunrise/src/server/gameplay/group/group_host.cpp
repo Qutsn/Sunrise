@@ -354,8 +354,13 @@ void fill_activity_host(wire::ActivityHostParameter& body,
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::debug,
-           "ev=gameplay stage=activityhost result=%s host=0x%llX address=0x%08X port=%u names=%s",
+           "ev=gameplay stage=activityhost result=%s session=0x%016llX reset=%u "
+           "released=0x%08X carried=0x%08X host=0x%llX address=0x%08X port=%u names=%s",
            sent ? "queued" : "deferred",
+           static_cast<unsigned long long>(update.sessionId),
+           static_cast<unsigned>(update.resetFlag ? 1U : 0U),
+           static_cast<unsigned>(update.releasedMask),
+           static_cast<unsigned>(update.carriedMask),
            static_cast<unsigned long long>(update.activityHost.hostId),
            update.activityHost.address,
            static_cast<unsigned>(update.activityHost.port),
@@ -420,8 +425,11 @@ void answer_parameters(std::uint64_t sessionId, std::uint64_t requested) noexcep
     }
     if (carried == 0) {
         report(core::log::Level::debug,
-               "ev=gameplay stage=parameters result=unheld mask=0x%08X",
-               static_cast<unsigned>(requested));
+               "ev=gameplay stage=parameters result=unheld session=0x%016llX "
+               "requested=0x%08X carried=0x%08X",
+               static_cast<unsigned long long>(sessionId),
+               static_cast<unsigned>(requested),
+               static_cast<unsigned>(carried));
         return;
     }
 
@@ -441,9 +449,14 @@ void answer_parameters(std::uint64_t sessionId, std::uint64_t requested) noexcep
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=parameters result=%s carried=0x%08X names=%s",
+           "ev=gameplay stage=parameters result=%s session=0x%016llX reset=%u "
+           "released=0x%08X carried=0x%08X requested=0x%08X names=%s",
            sent ? "answered" : "fail",
+           static_cast<unsigned long long>(update.sessionId),
+           static_cast<unsigned>(update.resetFlag ? 1U : 0U),
+           static_cast<unsigned>(update.releasedMask),
            static_cast<unsigned>(carried),
+           static_cast<unsigned>(requested),
            wire::parameter_names(carried, names.data(), names.size()));
 }
 
@@ -836,9 +849,13 @@ bool publish_join_parameters(std::uint64_t sessionId) noexcept {
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=parameters result=%s released=0x%08X names=%s",
+           "ev=gameplay stage=parameters result=%s session=0x%016llX reset=%u "
+           "released=0x%08X carried=0x%08X names=%s",
            sent ? "queued" : "fail",
+           static_cast<unsigned long long>(update.sessionId),
+           static_cast<unsigned>(update.resetFlag ? 1U : 0U),
            static_cast<unsigned>(update.releasedMask),
+           static_cast<unsigned>(update.carriedMask),
            wire::parameter_names(update.releasedMask, names.data(), names.size()));
     return sent;
 }

@@ -44,6 +44,7 @@ enum class EventKind : std::uint8_t {
     clientCreate,
     clientReady,
     clientDispose,
+    parameterState,
 };
 
 struct Event {
@@ -289,6 +290,48 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
     return false;
 }
 
+/** Parses native logs that name a gameplay-group activity parameter. */
+[[nodiscard]] bool parse_parameter_state(std::string_view text, Event& event) noexcept {
+    struct ParameterName {
+        std::string_view native;
+        std::string_view stable;
+    };
+    constexpr std::array<ParameterName, 7> kNames{{
+        {"activity-host", "activity_host"},
+        {"activity-selection-responses", "activity_selection_responses"},
+        {"activity-selection", "activity_selection"},
+        {"current-activity", "current_activity"},
+        {"previous-activity", "previous_activity"},
+        {"initial-slice-set-status", "initial_slice_set_status"},
+        {"world-controller-goal-data", "world_controller_goal_data"},
+    }};
+    const bool mentionsParameter = text.find("parameter") != std::string_view::npos
+                                   || text.find("Parameter") != std::string_view::npos;
+    if (!mentionsParameter) {
+        return false;
+    }
+    for (const ParameterName& name : kNames) {
+        if (text.find(name.native) != std::string_view::npos) {
+            event = {};
+            event.kind = EventKind::parameterState;
+            copy_token(name.stable, event.firstText);
+            if (text.find("release") != std::string_view::npos
+                || text.find("drop") != std::string_view::npos
+                || text.find("clear") != std::string_view::npos) {
+                copy_token("released", event.secondText);
+            } else if (text.find("update") != std::string_view::npos
+                       || text.find("apply") != std::string_view::npos
+                       || text.find("set") != std::string_view::npos) {
+                copy_token("updated", event.secondText);
+            } else {
+                copy_token("observed", event.secondText);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Names one structured event. */
 [[nodiscard]] const char* event_name(EventKind kind) noexcept {
     switch (kind) {
@@ -316,6 +359,8 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
         return "client_ready";
     case EventKind::clientDispose:
         return "client_dispose";
+    case EventKind::parameterState:
+        return "parameter_state";
     }
     return "unknown";
 }
@@ -391,6 +436,13 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
                                      event.firstText,
                                      event.secondText);
         break;
+    case EventKind::parameterState:
+        detailLength = std::snprintf(detail.data(),
+                                     detail.size(),
+                                     "name=%s action=%s",
+                                     event.firstText,
+                                     event.secondText);
+        break;
     }
     if (detailLength <= 0) {
         return 0;
@@ -433,7 +485,8 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
 [[nodiscard]] bool parse(std::string_view text, Event& event, Context& context) noexcept {
     return parse_selection(text, event, context) || parse_arrival(text, event, context)
            || parse_cache(text, event, context) || parse_transition(text, event)
-           || parse_lifecycle(text, event) || parse_state(text, event);
+           || parse_lifecycle(text, event) || parse_parameter_state(text, event)
+           || parse_state(text, event);
 }
 
 } // namespace

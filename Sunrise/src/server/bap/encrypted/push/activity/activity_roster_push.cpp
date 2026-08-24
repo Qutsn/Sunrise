@@ -53,6 +53,28 @@ bool append_roster_notification(Session& session,
         return false;
     }
 
+    std::array<char, core::log::kLineCapacity> stateLine{};
+    const int stateWritten = std::snprintf(
+        stateLine.data(),
+        stateLine.size(),
+        "ev=activity stage=roster result=prepared soid=0x%llX epoch1=0x%llX epoch2=0x%llX "
+        "dest=%.*s region=%u slice=%u spawn=0x%X groups=%zu state=%u",
+        static_cast<unsigned long long>(session.activity.session.sessionId),
+        static_cast<unsigned long long>(snapshot.patchEpoch.first),
+        static_cast<unsigned long long>(snapshot.patchEpoch.second),
+        static_cast<int>(name.size()),
+        name.data(),
+        snapshot.region,
+        snapshot.spawnSliceSet,
+        snapshot.spawnSetHash,
+        snapshot.roster.groupCount,
+        session.activityRosterState);
+    if (stateWritten > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {stateLine.data(), static_cast<std::size_t>(stateWritten)});
+    }
+
     // The grant is picked here and committed only once the frame reaches the caller, so a
     // discarded body leaves the bubble ungranted and the next push retries it.
     state::activity::bubble_authority::Grant grant{};

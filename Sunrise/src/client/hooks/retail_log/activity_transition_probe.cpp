@@ -13,6 +13,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../state/activity/runtime.h"
+#include "activity_egress_probe.h"
 
 namespace sunrise::client::hooks::retail_log::activity_probe {
 namespace {
@@ -498,11 +499,24 @@ void observe(std::int32_t siteId, std::string_view text) noexcept {
     Event event{};
     std::array<char, core::log::kLineCapacity> line{};
     std::size_t length = 0;
+    Context snapshot{};
+    bool armEgress = false;
     AcquireSRWLockExclusive(&g_lock);
     if (parse(text, event, g_context)) {
         length = format_event(event, siteId, g_context, line);
+        armEgress = event.kind == EventKind::selection;
+        if (armEgress) {
+            snapshot = g_context;
+        }
     }
     ReleaseSRWLockExclusive(&g_lock);
+    if (armEgress) {
+        activity_egress_probe::arm(snapshot.selectionToken,
+                                   snapshot.activityIndex,
+                                   snapshot.selectionDestination,
+                                   snapshot.hasCache,
+                                   snapshot.cachedDestination);
+    }
     if (length != 0) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::debug,
@@ -511,6 +525,7 @@ void observe(std::int32_t siteId, std::string_view text) noexcept {
 }
 
 void reset() noexcept {
+    activity_egress_probe::reset();
     AcquireSRWLockExclusive(&g_lock);
     g_context = {};
     ReleaseSRWLockExclusive(&g_lock);

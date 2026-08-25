@@ -355,7 +355,8 @@ void fill_activity_host(wire::ActivityHostParameter& body,
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::debug,
            "ev=gameplay stage=activityhost result=%s session=0x%016llX reset=%u "
-           "released=0x%08X carried=0x%08X host=0x%llX address=0x%08X port=%u names=%s",
+           "released=0x%08X carried=0x%08X host=0x%llX address=0x%08X port=%u names=%s "
+           "body_modes=activity_host:full,current_activity:clear_root",
            sent ? "queued" : "deferred",
            static_cast<unsigned long long>(update.sessionId),
            static_cast<unsigned>(update.resetFlag ? 1U : 0U),

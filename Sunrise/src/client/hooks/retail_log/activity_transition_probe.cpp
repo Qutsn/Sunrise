@@ -46,6 +46,7 @@ enum class EventKind : std::uint8_t {
     clientReady,
     clientDispose,
     parameterState,
+    groupParameterScope,
 };
 
 struct Event {
@@ -333,6 +334,26 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
     return false;
 }
 
+/** Parses the native boundary where one Group Activity parameter scope is complete. */
+[[nodiscard]] bool parse_group_parameter_scope(std::string_view text, Event& event) noexcept {
+    constexpr std::string_view kPrefix =
+        "world_controller:activity_manager: As HOST finished setting '";
+    const std::size_t start = text.find(kPrefix);
+    if (start == std::string_view::npos) {
+        return false;
+    }
+    const std::size_t valueStart = start + kPrefix.size();
+    const std::size_t valueEnd = text.find("' parameters", valueStart);
+    if (valueEnd == std::string_view::npos || valueEnd == valueStart) {
+        return false;
+    }
+    event = {};
+    event.kind = EventKind::groupParameterScope;
+    copy_token(text.substr(valueStart, valueEnd - valueStart), event.firstText);
+    copy_token("finished", event.secondText);
+    return true;
+}
+
 /** Names one structured event. */
 [[nodiscard]] const char* event_name(EventKind kind) noexcept {
     switch (kind) {
@@ -362,6 +383,8 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
         return "client_dispose";
     case EventKind::parameterState:
         return "parameter_state";
+    case EventKind::groupParameterScope:
+        return "group_parameter_scope";
     }
     return "unknown";
 }
@@ -444,6 +467,13 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
                                      event.firstText,
                                      event.secondText);
         break;
+    case EventKind::groupParameterScope:
+        detailLength = std::snprintf(detail.data(),
+                                     detail.size(),
+                                     "scope=%s action=%s",
+                                     event.firstText,
+                                     event.secondText);
+        break;
     }
     if (detailLength <= 0) {
         return 0;
@@ -486,7 +516,8 @@ void copy_suffix(std::string_view text, std::string_view marker, std::span<char>
 [[nodiscard]] bool parse(std::string_view text, Event& event, Context& context) noexcept {
     return parse_selection(text, event, context) || parse_arrival(text, event, context)
            || parse_cache(text, event, context) || parse_transition(text, event)
-           || parse_lifecycle(text, event) || parse_parameter_state(text, event)
+           || parse_lifecycle(text, event) || parse_group_parameter_scope(text, event)
+           || parse_parameter_state(text, event)
            || parse_state(text, event);
 }
 

@@ -199,6 +199,8 @@ bool process(const ServiceRoute& route,
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.subscription = webOutcome.subscription;
+        const auto* location =
+            web_service::mutation_if<state::activity::PendingLocationMutation>(webOutcome);
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);
         const auto* subclassSelection =
@@ -211,7 +213,9 @@ bool process(const ServiceRoute& route,
             web_service::mutation_if<state::PendingProfileItemAcquisition>(webOutcome);
         const auto* itemDismantle =
             web_service::mutation_if<state::PendingItemDismantle>(webOutcome);
-        if (equipmentSwap != nullptr) {
+        if (location != nullptr) {
+            outcome.transaction = *location;
+        } else if (equipmentSwap != nullptr) {
             // Equip is an optimistic Character-screen action. Its status-pair value is the exact
             // Family-4 revision whose following Queuez frame makes it authoritative. Stage that
             // revision before encoding the reply, or the Client completes against the old store.

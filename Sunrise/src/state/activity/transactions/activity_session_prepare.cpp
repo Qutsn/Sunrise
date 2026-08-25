@@ -56,6 +56,24 @@ namespace {
     return true;
 }
 
+/** Captures one private destination with State's logical source activity. */
+[[nodiscard]] bool prepare_current_locked(
+    const ActivityState& state,
+    const destination::DestinationSelection& selection,
+    std::uint64_t soidBase,
+    std::uint64_t& sessionId,
+    PendingAllocation& allocation) noexcept {
+    destination::DestinationSelection preparedSelection = selection;
+    if (!destination::rewrite_previous_activity_index(
+            preparedSelection, state.currentActivityIndex)
+        || !prepare_locked(state, preparedSelection, soidBase, sessionId, allocation)) {
+        return false;
+    }
+    allocation.advancesCurrentActivity =
+        preparedSelection.activityIndex != destination::kAbsentActivityIndex;
+    return true;
+}
+
 /** Captures recreation of one earlier id with the caller-selected destination. */
 [[nodiscard]] bool prepare_with_id_locked(const ActivityState& state,
                                           const destination::DestinationSelection& selection,
@@ -119,6 +137,54 @@ bool prepare_session(const destination::DestinationSelection& selection,
         runtime::storage::g_state.activity, selection, soidBase, sessionId, allocation);
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return ready;
+}
+
+/** Prepares the private client's next destination from the logical current activity. */
+bool prepare_current_session(const destination::DestinationSelection& selection,
+                             std::uint64_t& sessionId,
+                             PendingAllocation& allocation) noexcept {
+    sessionId = kAbsentSessionId;
+    allocation = {};
+    if (!destination::valid(selection)) {
+        return false;
+    }
+
+    const std::uint64_t soidBase = session_soid_base();
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const bool ready =
+        prepare_current_locked(state, selection, soidBase, sessionId, allocation);
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return ready;
+}
+
+/** Prepares the private client's next destination using State's fixed default selection. */
+bool prepare_current_session(std::uint64_t& sessionId,
+                             PendingAllocation& allocation) noexcept {
+    sessionId = kAbsentSessionId;
+    allocation = {};
+    const std::uint64_t soidBase = session_soid_base();
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const bool ready = prepare_current_locked(
+        state, state.defaults.defaultDestination.selection, soidBase, sessionId, allocation);
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return ready;
+}
+
+/** Prepares a logical activity-location change without changing State. */
+bool prepare_location(std::int16_t activityIndex, PendingLocationMutation& mutation) noexcept {
+    mutation = {};
+    if (activityIndex < kOrbitActivityIndex
+        || activityIndex > destination::kMaximumActivityIndex) {
+        return false;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    mutation.activityIndex = activityIndex;
+    mutation.expectedStateRevision = runtime::storage::g_state.activity.stateRevision;
+    mutation.prepared = true;
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return true;
 }
 
 /** Prepares recreation of an earlier id at the authored default destination. */

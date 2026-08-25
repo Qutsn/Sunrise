@@ -120,6 +120,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
     publication = {};
     if (auto* allocation = transaction_if<state::activity::PendingAllocation>(outcome)) {
         const std::uint64_t sessionId = allocation->sessionId;
+        const bool advancesLocation = allocation->advancesCurrentActivity;
+        const std::int16_t previousActivity = allocation->destination.previousActivityIndex;
+        const std::int16_t currentActivity = allocation->destination.activityIndex;
         std::uint64_t bindingGeneration = 0;
         if (sessionId == state::activity::kAbsentSessionId
             || !reserve_activity_binding_generation(bindingGeneration)
@@ -131,7 +134,38 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
             return false;
         }
         publication.activity.bindingGeneration = bindingGeneration;
+        if (advancesLocation) {
+            std::array<char, core::log::kLineCapacity> line{};
+            const int written = std::snprintf(
+                line.data(),
+                line.size(),
+                "ev=activity stage=logical_location result=ok cause=selection from=%d to=%d",
+                static_cast<int>(previousActivity),
+                static_cast<int>(currentActivity));
+            if (written > 0) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::info,
+                                 {line.data(), static_cast<std::size_t>(written)});
+            }
+        }
         return true;
+    }
+    if (auto* mutation = transaction_if<state::activity::PendingLocationMutation>(outcome)) {
+        const std::int16_t activityIndex = mutation->activityIndex;
+        const bool committed = state::activity::commit(*mutation);
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=activity stage=logical_location result=%s cause=explicit_orbit to=%d",
+            committed ? "ok" : "fail",
+            static_cast<int>(activityIndex));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             committed ? core::log::Level::info : core::log::Level::warn,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
+        return committed;
     }
     if (auto* plan = transaction_if<activity_message::ActivityPlan>(outcome)) {
         if (plan->mutationDomain == activity_message::MutationDomain::entitySlots) {

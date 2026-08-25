@@ -130,9 +130,9 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         state::activity::destination::DestinationSelection forced{};
         if (state::activity::forced::apply(forced)) {
             report_forced(forced);
-            return state::activity::prepare_session(forced, sessionId, allocation);
+            return state::activity::prepare_current_session(forced, sessionId, allocation);
         }
-        return state::activity::prepare_session(sessionId, allocation);
+        return state::activity::prepare_current_session(sessionId, allocation);
     }
     report_selection(source);
     state::activity::destination::DestinationSelection destination{};
@@ -168,7 +168,26 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     if (state::activity::forced::apply(destination)) {
         report_forced(destination);
     }
-    return state::activity::prepare_session(destination, sessionId, allocation);
+    const bool prepared =
+        state::activity::prepare_current_session(destination, sessionId, allocation);
+    if (prepared) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int lineLength = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=bap svc=6 stage=selection_state result=prepared client_from=%d "
+            "server_from=%d to=%d descriptor_bits=%u",
+            static_cast<int>(source.sourceActivityIndex),
+            static_cast<int>(allocation.destination.previousActivityIndex),
+            static_cast<int>(allocation.destination.activityIndex),
+            static_cast<unsigned>(allocation.destination.descriptorBitLength));
+        if (lineLength > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(lineLength)});
+        }
+    }
+    return prepared;
 }
 
 } // namespace

@@ -28,6 +28,22 @@ namespace sunrise::state::activity {
                                    PendingAllocation& allocation) noexcept;
 
 /**
+ * Prepares the private client's next destination from State's logical current activity.
+ * The committed allocation advances that logical activity atomically with its session record.
+ * @param selection Client-selected destination whose source field is server-owned.
+ * @param sessionId Cleared, then receives the picked nonzero id.
+ * @param allocation Cleared, then receives the captured allocation and location change.
+ * @return True when the descriptor, destination, and State snapshot can be committed together.
+ */
+[[nodiscard]] bool prepare_current_session(const destination::DestinationSelection& selection,
+                                           std::uint64_t& sessionId,
+                                           PendingAllocation& allocation) noexcept;
+
+/** Prepares the private client's next destination using State's fixed default selection. */
+[[nodiscard]] bool prepare_current_session(std::uint64_t& sessionId,
+                                           PendingAllocation& allocation) noexcept;
+
+/**
  * Prepares recreation of an earlier id at the authored default destination.
  * The client reads its activity-client id once, so a record it still names must come back under
  * that id. TODO: no caller yet. Reconnect has to reach this before it is called.
@@ -56,6 +72,13 @@ namespace sunrise::state::activity {
  * @return True when the allocation committed in one step.
  */
 [[nodiscard]] bool commit(PendingAllocation& allocation) noexcept;
+
+/** Prepares a logical activity-location change without changing State. */
+[[nodiscard]] bool prepare_location(std::int16_t activityIndex,
+                                    PendingLocationMutation& mutation) noexcept;
+
+/** Commits one prepared logical activity-location change. */
+[[nodiscard]] bool commit(PendingLocationMutation& mutation) noexcept;
 
 /**
  * Frees one committed activity-session record.

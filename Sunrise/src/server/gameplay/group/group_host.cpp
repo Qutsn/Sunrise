@@ -915,4 +915,3 @@ void reset() noexcept {
 }
 
 } // namespace sunrise::server::gameplay::group
-

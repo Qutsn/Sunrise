@@ -1016,6 +1016,7 @@
     <ClInclude Include="src\state\activity\forced\definition.h" />
     <ClInclude Include="src\state\activity\forced\activity_forced_destination.h" />
     <ClInclude Include="src\state\activity\destination\activity_destination_snapshot.h" />
+    <ClInclude Include="src\state\activity\destination\activity_descriptor_fingerprint.h" />
     <ClInclude Include="src\state\activity\destination\activity_destination_validation.h" />
     <ClInclude Include="src\state\activity\destination\activity_destination_spawn_binding.h" />
     <ClInclude Include="src\state\activity\entity_slots\definition.h" />

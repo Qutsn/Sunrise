@@ -11,6 +11,7 @@
 #include "../../../../../middleware/bap/activity_message/activity_global_state_encoder.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
+#include "../../../../../state/activity/destination/activity_descriptor_fingerprint.h"
 #include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../../../state/activity/runtime.h"
@@ -124,7 +125,8 @@ bool append_global_state_notification(Scratch& scratch,
         stateLine.data(),
         stateLine.size(),
         "ev=activity stage=global_state result=prepared soid=0x%llX from=%d to=%d "
-        "reason=%d dest=%.*s bubbles=%u slice=%s:%u spawn=0x%X descriptor_bits=%zu",
+        "reason=%d dest=%.*s bubbles=%u slice=%s:%u spawn=0x%X descriptor_bits=%zu "
+        "descriptor_hash=0x%08X descriptor_core_hash=0x%08X",
         static_cast<unsigned long long>(binding.sessionId),
         body.fromActivityIndex,
         body.activityIndex,
@@ -136,7 +138,14 @@ bool append_global_state_notification(Scratch& scratch,
         body.hasSliceSet ? "set" : "none",
         body.sliceSetIndex,
         body.spawnSetHash,
-        body.descriptorBitLength);
+        body.descriptorBitLength,
+        state::activity::destination::descriptor_fingerprint(
+            std::span<const std::byte>(selection.descriptorBits),
+            selection.descriptorBitLength),
+        state::activity::destination::descriptor_fingerprint(
+            std::span<const std::byte>(selection.descriptorBits),
+            selection.descriptorBitLength,
+            true));
     if (stateWritten > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::debug,

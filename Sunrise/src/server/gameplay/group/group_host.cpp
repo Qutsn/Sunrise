@@ -325,8 +325,8 @@ template <typename Body>
  */
 void fill_activity_host(wire::ActivityHostParameter& body,
                         const HostSessionBinding& binding) noexcept {
-    // The peer's `current-activity` carries this host's empty delta, so its nonce is the
-    // descriptor default and the comparand is the empty id.
+    // The activity-host selection id is not recovered yet. Keep it at the neutral value while
+    // the endpoint identity below remains authoritative for the join.
     body.selectionId = 0;
     // The peer addresses its activity join request to this id, and the activity route refuses one
     // that names no committed activity session. A gameplay identity is not one.
@@ -355,11 +355,14 @@ void fill_activity_host(wire::ActivityHostParameter& body,
     }
     wire::ParameterUpdate update{};
     update.sessionId = record.sessionId;
-    // Both go in one update, so the peer never holds the host without the activity it belongs to.
-    // `current-activity` carries an empty delta, which leaves the peer's own descriptor defaults.
+    // Publish only the host endpoint here. A clear-root `current-activity` body is a valid
+    // container, but it tells the peer to keep its descriptor defaults. During a direct
+    // destination switch those defaults are the Earth orbit context, so publishing the empty
+    // delta can overwrite the source activity before the new global state arrives. The complete
+    // current-activity descriptor is not decoded yet; omitting it preserves the peer's existing
+    // source context until that codec is recovered.
     update.carriedMask =
-        (std::uint64_t{1} << static_cast<std::uint8_t>(wire::Parameter::activityHost))
-        | (std::uint64_t{1} << static_cast<std::uint8_t>(wire::Parameter::currentActivity));
+        std::uint64_t{1} << static_cast<std::uint8_t>(wire::Parameter::activityHost);
     fill_activity_host(update.activityHost, binding);
 
     const bool sent = send_reliable(
@@ -371,7 +374,7 @@ void fill_activity_host(wire::ActivityHostParameter& body,
     report(sent ? core::log::Level::info : core::log::Level::debug,
            "ev=gameplay stage=activityhost result=%s session=0x%016llX reset=%u "
            "released=0x%08X carried=0x%08X host=0x%llX address=0x%08X port=%u names=%s "
-           "body_modes=activity_host:full,current_activity:clear_root",
+           "body_modes=activity_host:full",
            sent ? "queued" : "deferred",
            static_cast<unsigned long long>(update.sessionId),
            static_cast<unsigned>(update.resetFlag ? 1U : 0U),

@@ -1,4 +1,4 @@
-﻿#include "group_host.h"
+#include "group_host.h"
 
 #include <Windows.h>
 
@@ -52,6 +52,8 @@ constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
 constexpr std::uint32_t kAllMembers = 0xFFFFFFFF;
 /** Shortest gap between two retries of an owed publish. */
 constexpr std::uint64_t kRetryInterval = 250;
+/** Monotonic diagnostic sequence for reliable Group Activity messages. */
+std::atomic<std::uint64_t> g_reliableSequence{0};
 /** Player slot the admitted peer's player takes. */
 constexpr std::uint32_t kPeerPlayerSlot = 0;
 /** Counter the first player of a session carries. The consumer's own add starts here too. */
@@ -126,8 +128,21 @@ template <typename Body>
     if (!write(writer) || !writer.finish(size)) {
         return false;
     }
-    return peer::enqueue_reliable(
-        sessionId, id, declaredSize, {body.data(), size}, writer.bit_count());
+    const std::uint64_t sequence = g_reliableSequence.fetch_add(1) + 1;
+    const std::size_t bitsWritten = writer.bit_count();
+    const bool queued = peer::enqueue_reliable(
+        sessionId, id, declaredSize, {body.data(), size}, bitsWritten);
+    report(queued ? core::log::Level::debug : core::log::Level::warn,
+           "ev=gameplay stage=wire_enqueue result=%s sequence=%llu session=0x%016llX id=%u "
+           "declared=%u bytes=%zu bits=%zu",
+           queued ? "queued" : "deferred",
+           static_cast<unsigned long long>(sequence),
+           static_cast<unsigned long long>(sessionId),
+           static_cast<unsigned>(id),
+           static_cast<unsigned>(declaredSize),
+           size,
+           bitsWritten);
+    return queued;
 }
 
 /** @return True when two endpoints name the same address and port. */
@@ -897,3 +912,4 @@ void reset() noexcept {
 }
 
 } // namespace sunrise::server::gameplay::group
+

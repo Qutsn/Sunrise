@@ -1,4 +1,4 @@
-﻿#include "group_host.h"
+#include "group_host.h"
 
 #include <Windows.h>
 
@@ -915,3 +915,4 @@ void reset() noexcept {
 }
 
 } // namespace sunrise::server::gameplay::group
+

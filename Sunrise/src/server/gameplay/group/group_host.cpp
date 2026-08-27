@@ -13,6 +13,7 @@
 #include "../../../middleware/gameplay/group/session_messages.h"
 #include "../../../middleware/gameplay/group/session_state.h"
 #include "../../../middleware/gameplay/group/view_message.h"
+#include "../../../state/activity/destination/activity_descriptor_fingerprint.h"
 #include "../../../state/activity/runtime.h"
 #include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
@@ -58,6 +59,16 @@ std::atomic<std::uint64_t> g_reliableSequence{0};
 constexpr std::uint32_t kPeerPlayerSlot = 0;
 /** Counter the first player of a session carries. The consumer's own add starts here too. */
 constexpr std::uint32_t kFirstAddSequence = 0;
+
+/**
+ * Computes a non-reversible identity for one encoded reliable body.
+ * The bit length is included so bodies with equal byte prefixes but different meaningful tails
+ * remain distinguishable without writing protocol payload bytes to the log.
+ */
+[[nodiscard]] std::uint32_t reliable_body_fingerprint(std::span<const std::byte> body,
+                                                       std::size_t bitLength) noexcept {
+    return state::activity::destination::descriptor_fingerprint(body, bitLength);
+}
 
 /** One admitted peer and the player it asked this host to add. */
 struct Admitted {
@@ -130,18 +141,21 @@ template <typename Body>
     }
     const std::uint64_t sequence = g_reliableSequence.fetch_add(1) + 1;
     const std::size_t bitsWritten = writer.bit_count();
+    const std::uint32_t bodyHash = reliable_body_fingerprint(
+        std::span<const std::byte>(body.data(), size), bitsWritten);
     const bool queued = peer::enqueue_reliable(
         sessionId, id, declaredSize, {body.data(), size}, bitsWritten);
     report(queued ? core::log::Level::debug : core::log::Level::warn,
            "ev=gameplay stage=wire_enqueue result=%s sequence=%llu session=0x%016llX id=%u "
-           "declared=%u bytes=%zu bits=%zu",
+           "declared=%u bytes=%zu bits=%zu body_hash=0x%08X",
            queued ? "queued" : "deferred",
            static_cast<unsigned long long>(sequence),
            static_cast<unsigned long long>(sessionId),
            static_cast<unsigned>(id),
            static_cast<unsigned>(declaredSize),
            size,
-           bitsWritten);
+           bitsWritten,
+           bodyHash);
     return queued;
 }
 
@@ -371,7 +385,7 @@ void fill_activity_host(wire::ActivityHostParameter& body,
     report(sent ? core::log::Level::info : core::log::Level::debug,
            "ev=gameplay stage=activityhost result=%s session=0x%016llX reset=%u "
            "released=0x%08X carried=0x%08X host=0x%llX address=0x%08X port=%u names=%s "
-           "body_modes=activity_host:full,current_activity:clear_root",
+           "body_modes=activity_host:full,current_activity:clear_root current_activity_root=0",
            sent ? "queued" : "deferred",
            static_cast<unsigned long long>(update.sessionId),
            static_cast<unsigned>(update.resetFlag ? 1U : 0U),

@@ -279,6 +279,8 @@
     <ClCompile Include="src\client\targets\game\game_retail_log_targets.cpp" />
     <ClCompile Include="src\client\patterns\game\retail_log\retail_log_signature_bytes.cpp" />
     <ClCompile Include="src\client\hooks\retail_log\retail_log_enqueue_observer.cpp" />
+    <ClCompile Include="src\client\hooks\retail_log\activity_transition_probe.cpp" />
+    <ClCompile Include="src\client\hooks\retail_log\activity_egress_probe.cpp" />
     <ClCompile Include="src\client\hooks\retail_log\retail_log_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\assert_handler\assert_handler_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\assert_handler\assert_handler_observer.cpp" />
@@ -1014,6 +1016,7 @@
     <ClInclude Include="src\state\activity\forced\definition.h" />
     <ClInclude Include="src\state\activity\forced\activity_forced_destination.h" />
     <ClInclude Include="src\state\activity\destination\activity_destination_snapshot.h" />
+    <ClInclude Include="src\state\activity\destination\activity_descriptor_fingerprint.h" />
     <ClInclude Include="src\state\activity\destination\activity_destination_validation.h" />
     <ClInclude Include="src\state\activity\destination\activity_destination_spawn_binding.h" />
     <ClInclude Include="src\state\activity\entity_slots\definition.h" />
@@ -1224,6 +1227,8 @@
     <ClInclude Include="src\client\targets\game\retail_log.h" />
     <ClInclude Include="src\client\patterns\game\retail_log\retail_log_signature_bytes.h" />
     <ClInclude Include="src\client\hooks\retail_log\retail_log_enqueue_observer.h" />
+    <ClInclude Include="src\client\hooks\retail_log\activity_transition_probe.h" />
+    <ClInclude Include="src\client\hooks\retail_log\activity_egress_probe.h" />
     <ClInclude Include="src\client\hooks\retail_log\retail_log_lifecycle.h" />
     <ClInclude Include="src\client\hooks\egress\resolver\redirect.h" />
     <ClInclude Include="src\core\settings\client\external\definition.h" />

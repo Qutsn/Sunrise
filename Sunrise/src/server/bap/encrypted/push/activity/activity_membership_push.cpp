@@ -2,6 +2,10 @@
 
 #include <Windows.h>
 
+#include <array>
+#include <cstdio>
+
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
@@ -75,7 +79,16 @@ bool append_membership_notification(Scratch& scratch,
                                     std::array<std::byte, state::kBapNonceSize>& nonce,
                                     std::span<std::byte> response,
                                     std::size_t& written) noexcept {
-    if (written > response.size() || !activity.membershipMutation.hasSnapshot) {
+    if (written > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=activity stage=membership result=skipped reason=response_bounds");
+        return false;
+    }
+    if (!activity.membershipMutation.hasSnapshot) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=activity stage=membership result=skipped reason=no_snapshot");
         return false;
     }
 
@@ -85,6 +98,28 @@ bool append_membership_notification(Scratch& scratch,
     std::uint64_t hostGeneration = 0;
     const message::MembershipSnapshot snapshot =
         make_wire_snapshot(session, activity.membershipMutation, hostGeneration);
+    std::array<char, core::log::kLineCapacity> stateLine{};
+    const int stateWritten = std::snprintf(
+        stateLine.data(),
+        stateLine.size(),
+        "ev=activity stage=membership result=prepared soid=0x%llX revision=%u epoch=%u "
+        "transition=%u spawn=%d:%u:%llu teleport=%d:%u:%d host=%s",
+        static_cast<unsigned long long>(session.activity.session.sessionId),
+        snapshot.revision,
+        snapshot.epoch,
+        snapshot.transitionToken,
+        static_cast<int>(snapshot.spawn.state),
+        snapshot.spawn.opaqueByte,
+        static_cast<unsigned long long>(snapshot.spawn.opaqueValue),
+        static_cast<int>(snapshot.teleport.state),
+        snapshot.teleport.token,
+        snapshot.teleport.sliceSetIndex,
+        snapshot.citizen.present ? "yes" : "no");
+    if (stateWritten > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {stateLine.data(), static_cast<std::size_t>(stateWritten)});
+    }
     const bool encoded =
         message::encode_replicate_membership(snapshot, scratch.responseBody, messageSize)
         && append_notification_frame(scratch,

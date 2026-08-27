@@ -11,6 +11,7 @@
 activity_manager_selection_parser.h"
 #include "../../../../middleware/bap/activity_host_manager/response/activity_manager_response.h"
 #include "../../../../state/activity/defaults/activity_defaults_snapshot.h"
+#include "../../../../state/activity/destination/activity_descriptor_fingerprint.h"
 #include "../../../../state/activity/forced/activity_forced_destination.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/build_data/runtime.h"
@@ -64,14 +65,23 @@ void report_selection(const request_selection::ActivityManagerSelection& source)
         std::snprintf(line.data(),
                       line.size(),
                       "ev=bap svc=6 stage=selection result=ok name=%.*s activity=%d "
-                      "from_activity=%d reason=%d bubble=0x%X spawn=0x%X",
+                      "from_activity=%d reason=%d bubble=0x%X spawn=0x%X descriptor_bits=%zu "
+                      "descriptor_hash=0x%08X descriptor_core_hash=0x%08X",
                       static_cast<int>(source.packageNameLength),
                       reinterpret_cast<const char*>(source.packageName.data()),
                       static_cast<int>(source.activityIndex),
                       static_cast<int>(source.sourceActivityIndex),
                       static_cast<int>(source.reason),
                       source.hasArrivalBubbleHash ? source.arrivalBubbleHash : 0U,
-                      source.hasSpawnSetHash ? source.spawnSetHash : 0U);
+                      source.hasSpawnSetHash ? source.spawnSetHash : 0U,
+                      source.descriptorBitLength,
+                      state::activity::destination::descriptor_fingerprint(
+                          std::span<const std::byte>(source.descriptorBits),
+                          source.descriptorBitLength),
+                      state::activity::destination::descriptor_fingerprint(
+                          std::span<const std::byte>(source.descriptorBits),
+                          source.descriptorBitLength,
+                          true));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
@@ -130,9 +140,9 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         state::activity::destination::DestinationSelection forced{};
         if (state::activity::forced::apply(forced)) {
             report_forced(forced);
-            return state::activity::prepare_session(forced, sessionId, allocation);
+            return state::activity::prepare_current_session(forced, sessionId, allocation);
         }
-        return state::activity::prepare_session(sessionId, allocation);
+        return state::activity::prepare_current_session(sessionId, allocation);
     }
     report_selection(source);
     state::activity::destination::DestinationSelection destination{};
@@ -168,7 +178,34 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     if (state::activity::forced::apply(destination)) {
         report_forced(destination);
     }
-    return state::activity::prepare_session(destination, sessionId, allocation);
+    const bool prepared =
+        state::activity::prepare_current_session(destination, sessionId, allocation);
+    if (prepared) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int lineLength = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=bap svc=6 stage=selection_state result=prepared client_from=%d "
+            "server_from=%d to=%d descriptor_bits=%u descriptor_hash=0x%08X "
+            "descriptor_core_hash=0x%08X",
+            static_cast<int>(source.sourceActivityIndex),
+            static_cast<int>(allocation.destination.previousActivityIndex),
+            static_cast<int>(allocation.destination.activityIndex),
+            static_cast<unsigned>(allocation.destination.descriptorBitLength),
+            state::activity::destination::descriptor_fingerprint(
+                std::span<const std::byte>(allocation.destination.descriptorBits),
+                allocation.destination.descriptorBitLength),
+            state::activity::destination::descriptor_fingerprint(
+                std::span<const std::byte>(allocation.destination.descriptorBits),
+                allocation.destination.descriptorBitLength,
+                true));
+        if (lineLength > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(lineLength)});
+        }
+    }
+    return prepared;
 }
 
 } // namespace

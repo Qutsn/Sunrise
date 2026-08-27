@@ -1,4 +1,4 @@
-﻿#include "group_host.h"
+#include "group_host.h"
 
 #include <Windows.h>
 
@@ -13,6 +13,7 @@
 #include "../../../middleware/gameplay/group/session_messages.h"
 #include "../../../middleware/gameplay/group/session_state.h"
 #include "../../../middleware/gameplay/group/view_message.h"
+#include "../../../state/activity/destination/activity_descriptor_fingerprint.h"
 #include "../../../state/activity/runtime.h"
 #include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
@@ -52,10 +53,22 @@ constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
 constexpr std::uint32_t kAllMembers = 0xFFFFFFFF;
 /** Shortest gap between two retries of an owed publish. */
 constexpr std::uint64_t kRetryInterval = 250;
+/** Monotonic diagnostic sequence for reliable Group Activity messages. */
+std::atomic<std::uint64_t> g_reliableSequence{0};
 /** Player slot the admitted peer's player takes. */
 constexpr std::uint32_t kPeerPlayerSlot = 0;
 /** Counter the first player of a session carries. The consumer's own add starts here too. */
 constexpr std::uint32_t kFirstAddSequence = 0;
+
+/**
+ * Computes a non-reversible identity for one encoded reliable body.
+ * The bit length is included so bodies with equal byte prefixes but different meaningful tails
+ * remain distinguishable without writing protocol payload bytes to the log.
+ */
+[[nodiscard]] std::uint32_t reliable_body_fingerprint(std::span<const std::byte> body,
+                                                       std::size_t bitLength) noexcept {
+    return state::activity::destination::descriptor_fingerprint(body, bitLength);
+}
 
 /** One admitted peer and the player it asked this host to add. */
 struct Admitted {
@@ -126,8 +139,24 @@ template <typename Body>
     if (!write(writer) || !writer.finish(size)) {
         return false;
     }
-    return peer::enqueue_reliable(
-        sessionId, id, declaredSize, {body.data(), size}, writer.bit_count());
+    const std::uint64_t sequence = g_reliableSequence.fetch_add(1) + 1;
+    const std::size_t bitsWritten = writer.bit_count();
+    const std::uint32_t bodyHash = reliable_body_fingerprint(
+        std::span<const std::byte>(body.data(), size), bitsWritten);
+    const bool queued = peer::enqueue_reliable(
+        sessionId, id, declaredSize, {body.data(), size}, bitsWritten);
+    report(queued ? core::log::Level::debug : core::log::Level::warn,
+           "ev=gameplay stage=wire_enqueue result=%s sequence=%llu session=0x%016llX id=%u "
+           "declared=%u bytes=%zu bits=%zu body_hash=0x%08X",
+           queued ? "queued" : "deferred",
+           static_cast<unsigned long long>(sequence),
+           static_cast<unsigned long long>(sessionId),
+           static_cast<unsigned>(id),
+           static_cast<unsigned>(declaredSize),
+           size,
+           bitsWritten,
+           bodyHash);
+    return queued;
 }
 
 /** @return True when two endpoints name the same address and port. */
@@ -341,7 +370,7 @@ void fill_activity_host(wire::ActivityHostParameter& body,
     wire::ParameterUpdate update{};
     update.sessionId = record.sessionId;
     // Both go in one update, so the peer never holds the host without the activity it belongs to.
-    // `current-activity` carries an empty delta, which leaves the peer's own descriptor defaults.
+    // The current-activity codec is still incomplete, so the empty root is the only safe body.
     update.carriedMask =
         (std::uint64_t{1} << static_cast<std::uint8_t>(wire::Parameter::activityHost))
         | (std::uint64_t{1} << static_cast<std::uint8_t>(wire::Parameter::currentActivity));
@@ -354,8 +383,14 @@ void fill_activity_host(wire::ActivityHostParameter& body,
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::debug,
-           "ev=gameplay stage=activityhost result=%s host=0x%llX address=0x%08X port=%u names=%s",
+           "ev=gameplay stage=activityhost result=%s session=0x%016llX reset=%u "
+           "released=0x%08X carried=0x%08X host=0x%llX address=0x%08X port=%u names=%s "
+           "body_modes=activity_host:full,current_activity:clear_root current_activity_root=0",
            sent ? "queued" : "deferred",
+           static_cast<unsigned long long>(update.sessionId),
+           static_cast<unsigned>(update.resetFlag ? 1U : 0U),
+           static_cast<unsigned>(update.releasedMask),
+           static_cast<unsigned>(update.carriedMask),
            static_cast<unsigned long long>(update.activityHost.hostId),
            update.activityHost.address,
            static_cast<unsigned>(update.activityHost.port),
@@ -420,8 +455,11 @@ void answer_parameters(std::uint64_t sessionId, std::uint64_t requested) noexcep
     }
     if (carried == 0) {
         report(core::log::Level::debug,
-               "ev=gameplay stage=parameters result=unheld mask=0x%08X",
-               static_cast<unsigned>(requested));
+               "ev=gameplay stage=parameters result=unheld session=0x%016llX "
+               "requested=0x%08X carried=0x%08X",
+               static_cast<unsigned long long>(sessionId),
+               static_cast<unsigned>(requested),
+               static_cast<unsigned>(carried));
         return;
     }
 
@@ -441,9 +479,14 @@ void answer_parameters(std::uint64_t sessionId, std::uint64_t requested) noexcep
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=parameters result=%s carried=0x%08X names=%s",
+           "ev=gameplay stage=parameters result=%s session=0x%016llX reset=%u "
+           "released=0x%08X carried=0x%08X requested=0x%08X names=%s",
            sent ? "answered" : "fail",
+           static_cast<unsigned long long>(update.sessionId),
+           static_cast<unsigned>(update.resetFlag ? 1U : 0U),
+           static_cast<unsigned>(update.releasedMask),
            static_cast<unsigned>(carried),
+           static_cast<unsigned>(requested),
            wire::parameter_names(carried, names.data(), names.size()));
 }
 
@@ -836,9 +879,13 @@ bool publish_join_parameters(std::uint64_t sessionId) noexcept {
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=parameters result=%s released=0x%08X names=%s",
+           "ev=gameplay stage=parameters result=%s session=0x%016llX reset=%u "
+           "released=0x%08X carried=0x%08X names=%s",
            sent ? "queued" : "fail",
+           static_cast<unsigned long long>(update.sessionId),
+           static_cast<unsigned>(update.resetFlag ? 1U : 0U),
            static_cast<unsigned>(update.releasedMask),
+           static_cast<unsigned>(update.carriedMask),
            wire::parameter_names(update.releasedMask, names.data(), names.size()));
     return sent;
 }

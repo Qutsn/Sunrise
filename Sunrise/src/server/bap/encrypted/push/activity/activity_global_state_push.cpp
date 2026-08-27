@@ -3,11 +3,15 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <string_view>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/activity_global_state_encoder.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
+#include "../../../../../state/activity/destination/activity_descriptor_fingerprint.h"
 #include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../../../state/activity/runtime.h"
@@ -103,8 +107,49 @@ bool append_global_state_notification(Scratch& scratch,
                                       std::size_t& written) noexcept {
     message::GlobalActivityState body{};
     state::activity::destination::DestinationSelection selection{};
-    if (written > response.size() || !resolve_state(binding, body, selection)) {
+    if (written > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=activity stage=global_state result=skipped reason=response_bounds");
         return false;
+    }
+    if (!resolve_state(binding, body, selection)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=activity stage=global_state result=skipped reason=binding");
+        return false;
+    }
+
+    std::array<char, core::log::kLineCapacity> stateLine{};
+    const int stateWritten = std::snprintf(
+        stateLine.data(),
+        stateLine.size(),
+        "ev=activity stage=global_state result=prepared soid=0x%llX from=%d to=%d "
+        "reason=%d dest=%.*s bubbles=%u slice=%s:%u spawn=0x%X descriptor_bits=%zu "
+        "descriptor_hash=0x%08X descriptor_core_hash=0x%08X",
+        static_cast<unsigned long long>(binding.sessionId),
+        body.fromActivityIndex,
+        body.activityIndex,
+        body.reason,
+        static_cast<int>((std::min)(static_cast<std::size_t>(selection.packageNameLength),
+                                    selection.packageName.size())),
+        reinterpret_cast<const char*>(selection.packageName.data()),
+        body.bubbleCount,
+        body.hasSliceSet ? "set" : "none",
+        body.sliceSetIndex,
+        body.spawnSetHash,
+        body.descriptorBitLength,
+        state::activity::destination::descriptor_fingerprint(
+            std::span<const std::byte>(selection.descriptorBits),
+            selection.descriptorBitLength),
+        state::activity::destination::descriptor_fingerprint(
+            std::span<const std::byte>(selection.descriptorBits),
+            selection.descriptorBitLength,
+            true));
+    if (stateWritten > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {stateLine.data(), static_cast<std::size_t>(stateWritten)});
     }
 
     const std::size_t initialWritten = written;

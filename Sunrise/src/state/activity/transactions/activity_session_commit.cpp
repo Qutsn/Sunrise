@@ -19,7 +19,9 @@ bool commit(PendingAllocation& allocation) noexcept {
         || prepared.expectedStateRevision == kInvalidRevision
         || prepared.expectedAllocatorRevision == kInvalidRevision
         || (!prepared.recreated && !namesNextId) || prepared.targetSlot >= kSessionCapacity
-        || !destination::valid(prepared.destination)) {
+        || !destination::valid(prepared.destination)
+        || (prepared.advancesCurrentActivity
+            && prepared.destination.activityIndex == destination::kAbsentActivityIndex)) {
         return false;
     }
 
@@ -53,6 +55,37 @@ bool commit(PendingAllocation& allocation) noexcept {
         // The counter a re-created id fills was spent when it was first published, so the
         // allocator stays where it is and no later allocation can collide with it.
         transactions::advance_allocator(state);
+    }
+    if (prepared.advancesCurrentActivity) {
+        state.currentActivityIndex = prepared.destination.activityIndex;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return true;
+}
+
+/** Commits one prepared logical activity-location change. */
+bool commit(PendingLocationMutation& mutation) noexcept {
+    const PendingLocationMutation prepared = mutation;
+    mutation = {};
+    if (!prepared.prepared || prepared.expectedStateRevision == kInvalidRevision
+        || prepared.activityIndex < kOrbitActivityIndex
+        || prepared.activityIndex > destination::kMaximumActivityIndex) {
+        return false;
+    }
+
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    if (state.stateRevision != prepared.expectedStateRevision) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return false;
+    }
+    if (state.currentActivityIndex != prepared.activityIndex) {
+        if (state.stateRevision == kMaximumRevision) {
+            ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+            return false;
+        }
+        state.currentActivityIndex = prepared.activityIndex;
+        ++state.stateRevision;
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     return true;

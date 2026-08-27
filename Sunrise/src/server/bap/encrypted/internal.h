@@ -89,6 +89,7 @@ struct ServiceOutcome {
     /** One service owns at most one independently versioned transaction. */
     using Transaction = std::variant<std::monostate,
                                      state::activity::PendingAllocation,
+                                     state::activity::PendingLocationMutation,
                                      activity_message::ActivityPlan,
                                      state::matchmaking::PendingMutation,
                                      EquipmentSwapTransaction,

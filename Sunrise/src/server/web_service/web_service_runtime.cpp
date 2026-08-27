@@ -23,6 +23,7 @@
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
+#include "../../state/activity/runtime.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
 #include "opcode_routes.h"
@@ -46,6 +47,10 @@ constexpr std::uint16_t kItemStateOpcode = 406;
 constexpr std::uint16_t kItemDismantleOpcode = 402;
 /** Web Service opcode used by Collections to create one item instance. */
 constexpr std::uint16_t kItemAcquisitionOpcode = 1820;
+/** Web Service opcode emitted while entering Orbit setup. */
+constexpr std::uint16_t kOrbitSetupOpcode = 104;
+/** The one-byte explicit-Orbit form; direct travel emits zero for its temporary Orbit setup. */
+constexpr std::byte kExplicitOrbitPayload{0x40};
 /** The mutation variant's first alternative is the empty one, so index zero prepared nothing. */
 constexpr std::size_t kNoMutation = 0;
 /**
@@ -292,6 +297,12 @@ bool consume(std::span<const std::byte> request,
         mutate_item_state(message, outcome);
     } else if (message.opcode == kItemAcquisitionOpcode) {
         acquire_item(message, outcome);
+    } else if (message.opcode == kOrbitSetupOpcode && message.payload.size() == 1
+               && message.payload.front() == kExplicitOrbitPayload) {
+        state::activity::PendingLocationMutation mutation{};
+        if (state::activity::prepare_location(state::activity::kOrbitActivityIndex, mutation)) {
+            outcome.mutation = mutation;
+        }
     } else {
         dispatched = false;
     }

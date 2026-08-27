@@ -39,6 +39,8 @@ inline constexpr std::size_t kInvalidSessionSlot = kSessionCapacity;
 inline constexpr std::uint64_t kMaximumSessionId = (std::numeric_limits<std::uint64_t>::max)();
 /** Revisions never wrap because stale transactions could otherwise become valid again. */
 inline constexpr std::uint64_t kMaximumRevision = (std::numeric_limits<std::uint64_t>::max)();
+/** Orbit is activity index zero in the client selection protocol. */
+inline constexpr std::int16_t kOrbitActivityIndex = 0;
 
 /** Immutable identity of one committed activity-session record generation. */
 struct SessionBinding {
@@ -95,6 +97,15 @@ struct PendingAllocation {
      * where it is, because the counter it fills was spent long ago.
      */
     bool recreated{};
+    /** True only for the private client selection that advances logical player location. */
+    bool advancesCurrentActivity{};
+    bool prepared{};
+};
+
+/** Read-only logical-location change validated again under the State write lock. */
+struct PendingLocationMutation {
+    std::int16_t activityIndex{destination::kAbsentActivityIndex};
+    std::uint64_t expectedStateRevision{};
     bool prepared{};
 };
 
@@ -107,6 +118,8 @@ struct ActivityState {
     forced::ForcedDestination forced{};
     /** One arrival row per activity message type, so no routed message is silently dropped. */
     receipts::ReceiptRegistry receipts{};
+    /** Last committed private destination, used as the next selection's authoritative source. */
+    std::int16_t currentActivityIndex{kOrbitActivityIndex};
     std::uint64_t stateRevision{kInitialStateRevision};
     std::uint64_t nextSessionId{kFirstSessionId};
     std::uint64_t allocatorRevision{kInitialAllocatorRevision};
